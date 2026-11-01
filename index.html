@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Strawberry Bane</title>
+  <link rel="stylesheet" href="css/game.css" />
+</head>
+<body>
+  <div id="fit-root">
+  <div id="app">
+    <header class="top-bar">
+      <h1 class="brand">
+        <img
+          class="logo"
+          src="assets/ui/logo-strawberry-bane.png"
+          width="1193"
+          height="500"
+          alt="Strawberry Bane"
+        />
+      </h1>
+    </header>
+
+    <nav class="menu" id="main-menu">
+      <button type="button" id="btn-start" class="menu-btn primary">Start Game</button>
+      <button type="button" id="btn-intro" class="menu-btn">Intro</button>
+      <button type="button" id="btn-help" class="menu-btn">Help</button>
+      <button type="button" id="btn-credits" class="menu-btn">Credits</button>
+      <button type="button" id="btn-highscore" class="menu-btn">Highscore</button>
+    </nav>
+
+    <div class="hud" id="hud" hidden>
+      <div class="hud-item"><img src="assets/ui/heart.png" alt="" /><span id="lives">3</span></div>
+      <div class="hud-item"><img src="assets/ui/score.png" alt="" /><span id="score">0</span></div>
+      <div class="hud-item"><img src="assets/ui/time.png" alt="" /><span id="time">00:00</span></div>
+      <div class="hud-item"><img src="assets/ui/highscore.png" alt="" /><span id="highscore">0</span></div>
+      <div class="hud-hint">← → bewegen · Esc beenden</div>
+    </div>
+
+    <div id="stage-wrap">
+      <div id="stage-scale">
+        <div id="stage" tabindex="0" role="application" aria-label="Strawberry Bane Spielfeld">
+          <img class="bg" src="assets/background/background.jpg" alt="" draggable="false" />
+          <div id="entities"></div>
+          <div id="overlay-goodluck" class="overlay overlay-goodluck" hidden>
+            <div class="goodluck-stack">
+              <p class="overlay-caption">Good Luck!</p>
+              <img src="assets/ui/good-luck.png" alt="Good Luck!" />
+            </div>
+          </div>
+          <div id="overlay-gameover" class="overlay" hidden>
+            <img src="assets/ui/game-over.png" alt="Game Over" />
+          </div>
+          <div id="freeze-banner" hidden>🍍 Freeze — Tastatur gesperrt</div>
+          <div id="speed-banner" hidden>⚡ Speed ×1.5</div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="game-footer">
+      <p id="status" class="status" aria-live="polite"></p>
+      <p class="copyright">© 2026</p>
+    </footer>
+  </div>
+  </div><!-- #fit-root -->
+
+  <!-- Image / help modals -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-inner">
+      <img id="modal-img" alt="" />
+      <div class="modal-actions" id="modal-actions"></div>
+      <button type="button" class="modal-close" id="modal-close" title="Schließen">×</button>
+    </div>
+  </div>
+
+  <!-- Highscore list -->
+  <div id="hs-modal" class="modal" hidden>
+    <div class="modal-inner modal-panel">
+      <h2 class="modal-title">Highscore</h2>
+      <p class="modal-note">Top 10 — gespeichert lokal im Browser (<code>localStorage</code>). Für eine echte Online-Rangliste bräuchte es später einen Server.</p>
+      <ol id="hs-list" class="hs-list"></ol>
+      <div class="modal-actions">
+        <button type="button" id="hs-close" class="menu-btn">Close</button>
+      </div>
+      <button type="button" class="modal-close" id="hs-modal-x" title="Schließen">×</button>
+    </div>
+  </div>
+
+  <!-- Name entry for new highscore -->
+  <div id="name-modal" class="modal" hidden>
+    <div class="modal-inner modal-panel modal-panel-sm">
+      <h2 class="modal-title">New Highscore!</h2>
+      <p class="modal-note">Dein Score: <strong id="name-score">0</strong> — wie heißt du?</p>
+      <form id="name-form" class="name-form">
+        <label for="player-name">Name</label>
+        <input
+          id="player-name"
+          name="player-name"
+          type="text"
+          maxlength="20"
+          autocomplete="nickname"
+          placeholder="Dein Name"
+          required
+        />
+        <div class="modal-actions">
+          <button type="submit" class="menu-btn primary">Save</button>
+          <button type="button" id="name-skip" class="menu-btn">Skip</button>
+        </div>
+      </form>
+      <button type="button" class="modal-close" id="name-modal-x" title="Schließen">×</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/game.js"></script>
+</body>
+</html>
