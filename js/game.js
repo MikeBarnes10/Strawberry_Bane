@@ -530,8 +530,17 @@
 
   function moveImage(direction) {
     if (!state.bFormRunning) return;
-    if (state.keyboardLocked && performance.now() < state.unlockTime) return;
-    if (performance.now() >= state.unlockTime) state.keyboardLocked = false;
+    const now = performance.now();
+    // Unlock only when the latest unlockTime has elapsed (every Pineapple
+    // catch restarts unlockTime — never honor a stale earlier window).
+    if (now < state.unlockTime) {
+      state.keyboardLocked = true;
+      return;
+    }
+    if (state.keyboardLocked) {
+      state.keyboardLocked = false;
+      updateHud();
+    }
 
     if (direction === "Left" && state.baneCol > 0) {
       state.baneCol -= 1;
@@ -617,8 +626,9 @@
         case "Pineapple":
           playSound(SOUND_FILES.eat_crunch);
           state.lives += 1;
-          state.keyboardLocked = true;
-          state.unlockTime = performance.now() + FREEZE_MS;
+          // Every catch restarts a full FREEZE_MS lock from *this* moment
+          // (cancel any prior unlock timeout so it cannot clear the new freeze early).
+          activateKeyboardFreeze();
           break;
         default:
           break;
@@ -651,6 +661,38 @@
 
   // --- Speed boost ---
   let speedDeactivateId = null;
+  // --- Pineapple keyboard freeze (mirrors speed-boost cancel/reschedule) ---
+  let freezeUnlockId = null;
+
+  function clearFreezeUnlockTimeout() {
+    if (freezeUnlockId) {
+      clearTimeout(freezeUnlockId);
+      state.timers.delete(freezeUnlockId);
+      freezeUnlockId = null;
+    }
+  }
+
+  /**
+   * Restart the full FREEZE_MS keyboard lock from now.
+   * Must cancel any prior unlock timeout — otherwise catch #1's timer can fire
+   * during catch #2's window and clear keyboardLocked early (feels like the
+   * second Pineapple cancelled the freeze).
+   */
+  function activateKeyboardFreeze() {
+    const now = performance.now();
+    state.keyboardLocked = true;
+    state.unlockTime = now + FREEZE_MS;
+    clearFreezeUnlockTimeout();
+    freezeUnlockId = schedule(() => {
+      freezeUnlockId = null;
+      // Only unlock if this catch's window has actually elapsed (defensive).
+      if (performance.now() >= state.unlockTime) {
+        state.keyboardLocked = false;
+      }
+      updateHud();
+    }, FREEZE_MS);
+    updateHud();
+  }
 
   function activateIncreasedStep() {
     state.increasedStepActive = true;
@@ -868,6 +910,11 @@
       return;
     }
     timeEl.textContent = formatTime(elapsed);
+    // Keep freeze banner in sync even when no keys/collisions fire updateHud.
+    if (state.keyboardLocked && performance.now() >= state.unlockTime) {
+      state.keyboardLocked = false;
+    }
+    updateHud();
     // 4-minute speed boost: still based on elapsed time (checked each display tick)
     if (elapsed >= SPEED_AT_S && !state.increasedStepActive) {
       activateIncreasedStep();
@@ -948,6 +995,7 @@
     state.bGameEnded = false;
     state.keyboardLocked = false;
     state.unlockTime = 0;
+    clearFreezeUnlockTimeout();
     state.increasedStepActive = false;
     state.startTime = performance.now();
     state.lastDualAt = performance.now();
@@ -1014,6 +1062,9 @@
     setBaneVisible(false);
     clearAllTimers();
     speedDeactivateId = null;
+    freezeUnlockId = null;
+    state.keyboardLocked = false;
+    state.unlockTime = 0;
 
     // Brief delay then clear (VBA waits 1s)
     schedule(() => {
