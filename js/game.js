@@ -44,7 +44,7 @@
   const JUMP_UP_MS = 200; // slightly longer for 2× height; still snappy
   const JUMP_DOWN_MS = 280;
   const JUMP_TICK_MS = 16;
-  /** Jump stamina (option A): 3 pips, −1/jump, +1 / 8s on ground, Food +1. */
+  /** Jump stamina (option A): 3 pips, −1/jump, +1 / 8s on ground only (no item refill). */
   const JUMP_STAMINA_MAX = 3;
   const JUMP_STAMINA_REFILL_MS = 8000;
   const JUMP_REFILL_TICK_MS = 200;
@@ -778,7 +778,6 @@
         case "Food":
           playSound(SOUND_FILES.meal_burp);
           state.lives += 1;
-          addJumpStamina(1); // option A: Food +1 jump pip (capped)
           break;
         case "Cat":
           playSound(SOUND_FILES.cat_sound);
