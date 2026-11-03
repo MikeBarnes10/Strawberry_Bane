@@ -44,6 +44,10 @@
   const JUMP_UP_MS = 200; // slightly longer for 2× height; still snappy
   const JUMP_DOWN_MS = 280;
   const JUMP_TICK_MS = 16;
+  /** Jump stamina (option A): 3 pips, −1/jump, +1 / 8s on ground, Food +1. */
+  const JUMP_STAMINA_MAX = 3;
+  const JUMP_STAMINA_REFILL_MS = 8000;
+  const JUMP_REFILL_TICK_MS = 200;
   /** Best score (HUD). Full top-10 list lives under HS_LIST_KEY in localStorage. */
   const HS_KEY = "strawberryBaneHighscore";
   const HS_LIST_KEY = "strawberryBaneHighscoreList";
@@ -111,6 +115,7 @@
   const stageWrap = document.getElementById("stage-wrap");
   const entitiesEl = document.getElementById("entities");
   const livesEl = document.getElementById("lives");
+  const jumpPipsEl = document.getElementById("jump-pips");
   const scoreEl = document.getElementById("score");
   const timeEl = document.getElementById("time");
   const highscoreEl = document.getElementById("highscore");
@@ -229,6 +234,10 @@
     baneJumpOffset: 0,
     baneJumping: false,
     jumpAnimId: null,
+    jumpStamina: JUMP_STAMINA_MAX,
+    jumpRefillAccMs: 0,
+    jumpRefillLastTick: 0,
+    jumpRefillId: null,
     fallingItems: [],
     poodleActive: false,
     poodle: null,
@@ -411,6 +420,8 @@
       state.moveLoopId = null;
     }
     state.jumpAnimId = null;
+    state.jumpRefillId = null;
+    state.jumpRefillLastTick = 0;
   }
 
   function setStatus(msg) {
@@ -425,14 +436,93 @@
     }, ms);
   }
 
+  function renderJumpPips() {
+    if (!jumpPipsEl) return;
+    jumpPipsEl.innerHTML = "";
+    for (let i = 0; i < JUMP_STAMINA_MAX; i++) {
+      const pip = document.createElement("span");
+      pip.className = "jump-pip" + (i < state.jumpStamina ? " on" : "");
+      pip.setAttribute("aria-hidden", "true");
+      jumpPipsEl.appendChild(pip);
+    }
+    jumpPipsEl.setAttribute(
+      "aria-label",
+      "Jump stamina " + state.jumpStamina + " of " + JUMP_STAMINA_MAX
+    );
+  }
+
   function updateHud() {
     livesEl.textContent = String(state.lives);
+    renderJumpPips();
     scoreEl.textContent = String(state.score);
     setShown(
       freezeBanner,
       state.keyboardLocked && performance.now() < state.unlockTime
     );
     setShown(speedBanner, state.increasedStepActive);
+  }
+
+  function isJumpFreezeActive() {
+    return performance.now() < state.unlockTime;
+  }
+
+  function addJumpStamina(n) {
+    const before = state.jumpStamina;
+    state.jumpStamina = Math.min(
+      JUMP_STAMINA_MAX,
+      Math.max(0, state.jumpStamina + n)
+    );
+    if (state.jumpStamina === JUMP_STAMINA_MAX) state.jumpRefillAccMs = 0;
+    if (state.jumpStamina !== before) updateHud();
+  }
+
+  function clearJumpRefillTick() {
+    if (state.jumpRefillId) {
+      clearTimeout(state.jumpRefillId);
+      state.timers.delete(state.jumpRefillId);
+      state.jumpRefillId = null;
+    }
+    state.jumpRefillLastTick = 0;
+  }
+
+  /** Accrue refill only on ground and outside Pineapple freeze. */
+  function jumpRefillTick() {
+    if (!state.bFormRunning) {
+      state.jumpRefillId = null;
+      return;
+    }
+    const now = performance.now();
+    const last = state.jumpRefillLastTick || now;
+    const dt = Math.max(0, now - last);
+    state.jumpRefillLastTick = now;
+
+    if (
+      state.jumpStamina < JUMP_STAMINA_MAX &&
+      !isBaneAirborne() &&
+      !isJumpFreezeActive()
+    ) {
+      state.jumpRefillAccMs += dt;
+      let gained = false;
+      while (
+        state.jumpRefillAccMs >= JUMP_STAMINA_REFILL_MS &&
+        state.jumpStamina < JUMP_STAMINA_MAX
+      ) {
+        state.jumpRefillAccMs -= JUMP_STAMINA_REFILL_MS;
+        state.jumpStamina += 1;
+        gained = true;
+      }
+      if (state.jumpStamina === JUMP_STAMINA_MAX) state.jumpRefillAccMs = 0;
+      if (gained) updateHud();
+    }
+
+    state.jumpRefillId = schedule(jumpRefillTick, JUMP_REFILL_TICK_MS);
+  }
+
+  function startJumpRefillLoop() {
+    clearJumpRefillTick();
+    state.jumpRefillAccMs = 0;
+    state.jumpRefillLastTick = performance.now();
+    jumpRefillTick();
   }
 
   function formatTime(elapsedS) {
@@ -578,7 +668,9 @@
       updateHud();
     }
     if (state.baneJumping) return;
+    if (state.jumpStamina <= 0) return;
 
+    state.jumpStamina -= 1;
     state.baneJumping = true;
     clearJumpAnim();
     animateJumpOffset(0, JUMP_HEIGHT, JUMP_UP_MS, () => {
@@ -686,6 +778,7 @@
         case "Food":
           playSound(SOUND_FILES.meal_burp);
           state.lives += 1;
+          addJumpStamina(1); // option A: Food +1 jump pip (capped)
           break;
         case "Cat":
           playSound(SOUND_FILES.cat_sound);
@@ -1086,6 +1179,8 @@
   function showUserForm() {
     state.lives = 3;
     state.score = 0;
+    state.jumpStamina = JUMP_STAMINA_MAX;
+    state.jumpRefillAccMs = 0;
     state.bGameRunning = true;
     state.bGameEnded = false;
     state.keyboardLocked = false;
@@ -1115,6 +1210,8 @@
     startPoodleMovement();
     // VBA resets lives to 3 again after StartPoodleMovement
     state.lives = 3;
+    state.jumpStamina = JUMP_STAMINA_MAX;
+    startJumpRefillLoop();
     updateHud();
     focusStage();
     fitViewport();
@@ -1155,6 +1252,7 @@
     state.pendingSecondary = false;
     state.increasedStepActive = false;
     resetJump();
+    clearJumpRefillTick();
     setBaneVisible(false);
     clearAllTimers();
     speedDeactivateId = null;

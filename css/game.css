@@ -148,6 +148,30 @@ body {
   font-size: 1.1rem;
 }
 .hud-item img { width: 28px; height: 28px; object-fit: contain; }
+.hud-jump .jump-label {
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ink, #3a2a1a);
+}
+.jump-pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.jump-pip {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: 2px solid #c45c2a;
+  background: transparent;
+  opacity: 0.35;
+}
+.jump-pip.on {
+  background: #e87a3a;
+  opacity: 1;
+}
 .hud-hint { opacity: 0.7; font-size: 0.85rem; }
 
 #stage-wrap {
