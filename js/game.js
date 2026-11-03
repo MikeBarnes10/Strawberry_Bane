@@ -39,10 +39,10 @@
   const SPEED_AT_S = 240;
   const SPEED_BOOST_MS = 30000;
   const FREEZE_MS = 3000;
-  /** Jump: one Excel field (row) up, then sink back to catch row 7. */
-  const JUMP_HEIGHT = ROW_H; // 100 px = one play row
-  const JUMP_UP_MS = 160;
-  const JUMP_DOWN_MS = 220;
+  /** Jump trial: two Excel fields (rows) up, then sink back to catch row 7. */
+  const JUMP_HEIGHT = 2 * ROW_H; // 200 px = two play rows (Sebastian trial)
+  const JUMP_UP_MS = 200; // slightly longer for 2× height; still snappy
+  const JUMP_DOWN_MS = 280;
   const JUMP_TICK_MS = 16;
   /** Best score (HUD). Full top-10 list lives under HS_LIST_KEY in localStorage. */
   const HS_KEY = "strawberryBaneHighscore";
@@ -565,7 +565,7 @@
     tick();
   }
 
-  /** One-row hop: rise JUMP_HEIGHT, then sink back to the catch row. */
+  /** Two-row hop (trial): rise JUMP_HEIGHT, then sink back to the catch row. */
   function startJump() {
     if (!state.bFormRunning) return;
     const now = performance.now();
