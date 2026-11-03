@@ -39,6 +39,11 @@
   const SPEED_AT_S = 240;
   const SPEED_BOOST_MS = 30000;
   const FREEZE_MS = 3000;
+  /** Jump: one Excel field (row) up, then sink back to catch row 7. */
+  const JUMP_HEIGHT = ROW_H; // 100 px = one play row
+  const JUMP_UP_MS = 160;
+  const JUMP_DOWN_MS = 220;
+  const JUMP_TICK_MS = 16;
   /** Best score (HUD). Full top-10 list lives under HS_LIST_KEY in localStorage. */
   const HS_KEY = "strawberryBaneHighscore";
   const HS_LIST_KEY = "strawberryBaneHighscoreList";
@@ -220,6 +225,10 @@
     score: 0,
     highscore: Number(localStorage.getItem(HS_KEY) || 0),
     baneCol: 5, // 0..10 = Excel cols B..L; G = index 5
+    /** Pixels raised above ground (row 7) placement; 0 = standing. */
+    baneJumpOffset: 0,
+    baneJumping: false,
+    jumpAnimId: null,
     fallingItems: [],
     poodleActive: false,
     poodle: null,
@@ -401,6 +410,7 @@
       clearTimeout(state.moveLoopId);
       state.moveLoopId = null;
     }
+    state.jumpAnimId = null;
   }
 
   function setStatus(msg) {
@@ -498,6 +508,7 @@
       entitiesEl.appendChild(baneEl);
     }
     state.baneCol = 5;
+    resetJump();
     placeBane();
   }
 
@@ -505,10 +516,79 @@
     if (!baneEl) return;
     const { left, top } = centerInCell(state.baneCol, 7, BANE_W, BANE_H);
     baneEl.style.left = left + "px";
-    baneEl.style.top = top + "px";
+    baneEl.style.top = top - state.baneJumpOffset + "px";
     baneEl.style.width = BANE_W + "px";
     baneEl.style.height = BANE_H + "px";
     baneEl.style.zIndex = "8";
+  }
+
+  function clearJumpAnim() {
+    if (state.jumpAnimId) {
+      clearTimeout(state.jumpAnimId);
+      state.timers.delete(state.jumpAnimId);
+      state.jumpAnimId = null;
+    }
+  }
+
+  function resetJump() {
+    clearJumpAnim();
+    state.baneJumping = false;
+    state.baneJumpOffset = 0;
+  }
+
+  /**
+   * Animate baneJumpOffset from `from` to `to` over `durationMs`, then call `onDone`.
+   * placeBane each tick so left/right mid-jump and baneBox() stay in sync.
+   */
+  function animateJumpOffset(from, to, durationMs, onDone) {
+    const started = performance.now();
+    const tick = () => {
+      if (!state.bFormRunning) {
+        resetJump();
+        placeBane();
+        return;
+      }
+      const t = Math.min(1, (performance.now() - started) / durationMs);
+      // Ease-out on ascent, ease-in on descent (sink)
+      const eased = to > from ? 1 - Math.pow(1 - t, 2) : t * t;
+      state.baneJumpOffset = from + (to - from) * eased;
+      placeBane();
+      if (t < 1) {
+        state.jumpAnimId = schedule(tick, JUMP_TICK_MS);
+      } else {
+        state.jumpAnimId = null;
+        state.baneJumpOffset = to;
+        placeBane();
+        if (onDone) onDone();
+      }
+    };
+    tick();
+  }
+
+  /** One-row hop: rise JUMP_HEIGHT, then sink back to the catch row. */
+  function startJump() {
+    if (!state.bFormRunning) return;
+    const now = performance.now();
+    if (now < state.unlockTime) {
+      state.keyboardLocked = true;
+      return;
+    }
+    if (state.keyboardLocked) {
+      state.keyboardLocked = false;
+      updateHud();
+    }
+    if (state.baneJumping) return;
+
+    state.baneJumping = true;
+    clearJumpAnim();
+    animateJumpOffset(0, JUMP_HEIGHT, JUMP_UP_MS, () => {
+      animateJumpOffset(JUMP_HEIGHT, 0, JUMP_DOWN_MS, () => {
+        state.baneJumping = false;
+        state.baneJumpOffset = 0;
+        placeBane();
+      });
+    });
+    updateHud();
   }
 
   /** Bane only while the match is running (after Good Luck, before Game Over). */
@@ -833,6 +913,14 @@
     const stopLine = rowTop(7);
     const approxTopLeftRow = itemTopLeftExcelRow(item);
 
+    // While airborne, apply the same AABB catch as on the ground using the
+    // current jumped baneBox() — items can meet Bane one row higher.
+    if (state.baneJumpOffset > 0 && checkCollisionWithBane(item)) {
+      item.el.remove();
+      updateCellValues(item.name, true);
+      return false;
+    }
+
     if (approxTopLeftRow === 6) {
       if (checkCollisionWithBane(item)) {
         item.el.remove();
@@ -1013,7 +1101,7 @@
     setBaneVisible(true);
     state.bFormRunning = true;
     state.bMoveDownRunning = true;
-    setStatus("Spiel läuft — Pfeiltasten ← → · Esc beendet");
+    setStatus("Spiel läuft — Pfeiltasten ← → ↑ springen · Esc beendet");
     focusStage();
     updateTimer();
     dropItems();
@@ -1059,6 +1147,7 @@
     state.moveLoopActive = false;
     state.pendingSecondary = false;
     state.increasedStepActive = false;
+    resetJump();
     setBaneVisible(false);
     clearAllTimers();
     speedDeactivateId = null;
@@ -1210,12 +1299,18 @@
     } else if (e.key === "ArrowRight" || e.key === "Right") {
       e.preventDefault();
       moveImage("Right");
+    } else if (e.key === "ArrowUp" || e.key === "Up") {
+      e.preventDefault();
+      startJump();
     } else if (e.key === "a" || e.key === "A") {
       e.preventDefault();
       moveImage("Left");
     } else if (e.key === "d" || e.key === "D") {
       e.preventDefault();
       moveImage("Right");
+    } else if (e.key === "w" || e.key === "W") {
+      e.preventDefault();
+      startJump();
     } else if (e.key === "Escape") {
       e.preventDefault();
       endGame();
@@ -1250,7 +1345,7 @@
   setShown(toast, false);
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
-  setStatus("Bereit — Start Game · Klicke das Spielfeld, dann ← →");
+  setStatus("Bereit — Start Game · Klicke das Spielfeld, dann ← → ↑");
   fitViewport();
   // Re-fit after images (logo) load — height can change
   window.addEventListener("load", fitViewport);
