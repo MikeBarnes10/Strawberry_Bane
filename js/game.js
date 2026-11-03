@@ -466,16 +466,6 @@
     return performance.now() < state.unlockTime;
   }
 
-  function addJumpStamina(n) {
-    const before = state.jumpStamina;
-    state.jumpStamina = Math.min(
-      JUMP_STAMINA_MAX,
-      Math.max(0, state.jumpStamina + n)
-    );
-    if (state.jumpStamina === JUMP_STAMINA_MAX) state.jumpRefillAccMs = 0;
-    if (state.jumpStamina !== before) updateHud();
-  }
-
   function clearJumpRefillTick() {
     if (state.jumpRefillId) {
       clearTimeout(state.jumpRefillId);
