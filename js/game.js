@@ -608,8 +608,15 @@
     };
   }
 
+  /** True while rising/sinking — no column change mid-air (straight-up jump only). */
+  function isBaneAirborne() {
+    return state.baneJumping || state.baneJumpOffset > 0;
+  }
+
   function moveImage(direction) {
     if (!state.bFormRunning) return;
+    // Sebastian: left/right only on the catch row — no air strafe / side-jump.
+    if (isBaneAirborne()) return;
     const now = performance.now();
     // Unlock only when the latest unlockTime has elapsed (every Pineapple
     // catch restarts unlockTime — never honor a stale earlier window).
