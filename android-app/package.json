@@ -1,0 +1,20 @@
+{
+  "name": "strawberry-bane-android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor shell for Strawberry Bane (Enhanced). Web assets synced from parent game folder into www/.",
+  "scripts": {
+    "sync:www": "bash scripts/sync-www.sh",
+    "cap:sync": "npm run sync:www && npx cap sync",
+    "cap:open": "npx cap open android",
+    "cap:add:android": "npm run sync:www && npx cap add android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/core": "^6.2.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.0"
+  }
+}

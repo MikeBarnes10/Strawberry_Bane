@@ -39,6 +39,15 @@
   const SPEED_AT_S = 240;
   const SPEED_BOOST_MS = 30000;
   const FREEZE_MS = 3000;
+  /** Jump trial: two Excel fields (rows) up, then sink back to catch row 7. */
+  const JUMP_HEIGHT = 2 * ROW_H; // 200 px = two play rows (Sebastian trial)
+  const JUMP_UP_MS = 200; // slightly longer for 2× height; still snappy
+  const JUMP_DOWN_MS = 280;
+  const JUMP_TICK_MS = 16;
+  /** Jump stamina (option A): 3 pips, −1/jump, +1 / 8s on ground only (no item refill). */
+  const JUMP_STAMINA_MAX = 3;
+  const JUMP_STAMINA_REFILL_MS = 8000;
+  const JUMP_REFILL_TICK_MS = 200;
   /** Best score (HUD). Full top-10 list lives under HS_LIST_KEY in localStorage. */
   const HS_KEY = "strawberryBaneHighscore";
   const HS_LIST_KEY = "strawberryBaneHighscoreList";
@@ -106,6 +115,7 @@
   const stageWrap = document.getElementById("stage-wrap");
   const entitiesEl = document.getElementById("entities");
   const livesEl = document.getElementById("lives");
+  const jumpPipsEl = document.getElementById("jump-pips");
   const scoreEl = document.getElementById("score");
   const timeEl = document.getElementById("time");
   const highscoreEl = document.getElementById("highscore");
@@ -125,12 +135,17 @@
   const btnHelp = document.getElementById("btn-help");
   const btnCredits = document.getElementById("btn-credits");
   const btnHighscore = document.getElementById("btn-highscore");
+  const touchControls = document.getElementById("touch-controls");
+  const btnPadLeft = document.getElementById("btn-pad-left");
+  const btnPadRight = document.getElementById("btn-pad-right");
+  const btnPadJump = document.getElementById("btn-pad-jump");
   const hsModal = document.getElementById("hs-modal");
   const hsListEl = document.getElementById("hs-list");
   const nameModal = document.getElementById("name-modal");
   const nameForm = document.getElementById("name-form");
   const nameInput = document.getElementById("player-name");
   const nameScoreEl = document.getElementById("name-score");
+  const nameRankEl = document.getElementById("name-rank");
 
   // Sync CSS vars (logical size — never make these responsive percentages)
   document.documentElement.style.setProperty("--stage-w", STAGE_W + "px");
@@ -220,6 +235,14 @@
     score: 0,
     highscore: Number(localStorage.getItem(HS_KEY) || 0),
     baneCol: 5, // 0..10 = Excel cols B..L; G = index 5
+    /** Pixels raised above ground (row 7) placement; 0 = standing. */
+    baneJumpOffset: 0,
+    baneJumping: false,
+    jumpAnimId: null,
+    jumpStamina: JUMP_STAMINA_MAX,
+    jumpRefillAccMs: 0,
+    jumpRefillLastTick: 0,
+    jumpRefillId: null,
     fallingItems: [],
     poodleActive: false,
     poodle: null,
@@ -286,6 +309,43 @@
     return score > list[list.length - 1].score;
   }
 
+  /**
+   * Preview Top-10 place for a score before it is saved.
+   * Rank = 1 + #entries with strictly higher score (ties share that place).
+   */
+  function previewHighscoreRank(score) {
+    const s = Math.round(score);
+    const list = loadHighscoreList();
+    const qualifies = qualifiesForHighscoreList(s);
+    let better = 0;
+    let tied = 0;
+    for (const e of list) {
+      if (e.score > s) better += 1;
+      else if (e.score === s) tied += 1;
+    }
+    const rank = better + 1;
+    return { qualifies, rank, tied, listLen: list.length };
+  }
+
+  /** German line for the name-modal / toast, e.g. "· Platz 3 in den Top 10". */
+  function formatHighscoreRankLine(score) {
+    const info = previewHighscoreRank(score);
+    if (!info.qualifies) {
+      return " · leider nicht in den Top 10";
+    }
+    if (info.tied > 0) {
+      return (
+        " · Platz " +
+        info.rank +
+        " in den Top 10 (gleichauf mit " +
+        info.tied +
+        (info.tied === 1 ? " Eintrag" : " Einträgen") +
+        ")"
+      );
+    }
+    return " · Platz " + info.rank + " in den Top 10";
+  }
+
   function addHighscoreEntry(name, score) {
     const list = loadHighscoreList();
     list.push({
@@ -333,6 +393,7 @@
   function showNameModal(score) {
     pendingHsScore = score;
     nameScoreEl.textContent = String(score);
+    if (nameRankEl) nameRankEl.textContent = formatHighscoreRankLine(score);
     nameInput.value = "";
     setShown(nameModal, true);
     schedule(() => nameInput.focus(), 50);
@@ -350,6 +411,11 @@
       addHighscoreEntry(name, score);
       showToast("Highscore gespeichert: " + (name || "Player") + " — " + score);
     }
+  }
+
+  /** Skip / dismiss: close without writing a highscore entry. */
+  function skipNameEntry() {
+    hideNameModal();
   }
 
   // Seed HUD best from list / legacy single value
@@ -401,6 +467,9 @@
       clearTimeout(state.moveLoopId);
       state.moveLoopId = null;
     }
+    state.jumpAnimId = null;
+    state.jumpRefillId = null;
+    state.jumpRefillLastTick = 0;
   }
 
   function setStatus(msg) {
@@ -415,14 +484,83 @@
     }, ms);
   }
 
+  function renderJumpPips() {
+    if (!jumpPipsEl) return;
+    jumpPipsEl.innerHTML = "";
+    for (let i = 0; i < JUMP_STAMINA_MAX; i++) {
+      const pip = document.createElement("span");
+      pip.className = "jump-pip" + (i < state.jumpStamina ? " on" : "");
+      pip.setAttribute("aria-hidden", "true");
+      jumpPipsEl.appendChild(pip);
+    }
+    jumpPipsEl.setAttribute(
+      "aria-label",
+      "Jump stamina " + state.jumpStamina + " of " + JUMP_STAMINA_MAX
+    );
+  }
+
   function updateHud() {
     livesEl.textContent = String(state.lives);
+    renderJumpPips();
     scoreEl.textContent = String(state.score);
     setShown(
       freezeBanner,
       state.keyboardLocked && performance.now() < state.unlockTime
     );
     setShown(speedBanner, state.increasedStepActive);
+  }
+
+  function isJumpFreezeActive() {
+    return performance.now() < state.unlockTime;
+  }
+
+  function clearJumpRefillTick() {
+    if (state.jumpRefillId) {
+      clearTimeout(state.jumpRefillId);
+      state.timers.delete(state.jumpRefillId);
+      state.jumpRefillId = null;
+    }
+    state.jumpRefillLastTick = 0;
+  }
+
+  /** Accrue refill only on ground and outside Pineapple freeze. */
+  function jumpRefillTick() {
+    if (!state.bFormRunning) {
+      state.jumpRefillId = null;
+      return;
+    }
+    const now = performance.now();
+    const last = state.jumpRefillLastTick || now;
+    const dt = Math.max(0, now - last);
+    state.jumpRefillLastTick = now;
+
+    if (
+      state.jumpStamina < JUMP_STAMINA_MAX &&
+      !isBaneAirborne() &&
+      !isJumpFreezeActive()
+    ) {
+      state.jumpRefillAccMs += dt;
+      let gained = false;
+      while (
+        state.jumpRefillAccMs >= JUMP_STAMINA_REFILL_MS &&
+        state.jumpStamina < JUMP_STAMINA_MAX
+      ) {
+        state.jumpRefillAccMs -= JUMP_STAMINA_REFILL_MS;
+        state.jumpStamina += 1;
+        gained = true;
+      }
+      if (state.jumpStamina === JUMP_STAMINA_MAX) state.jumpRefillAccMs = 0;
+      if (gained) updateHud();
+    }
+
+    state.jumpRefillId = schedule(jumpRefillTick, JUMP_REFILL_TICK_MS);
+  }
+
+  function startJumpRefillLoop() {
+    clearJumpRefillTick();
+    state.jumpRefillAccMs = 0;
+    state.jumpRefillLastTick = performance.now();
+    jumpRefillTick();
   }
 
   function formatTime(elapsedS) {
@@ -453,8 +591,41 @@
 
   // --- Sound ---
   const audioCache = new Map();
+  let audioUnlocked = false;
+  let audioCtx = null;
+
+  /**
+   * Mobile autoplay: unlock HTMLAudio + AudioContext on the first user gesture.
+   * Safe to call repeatedly; no-ops after the first success path.
+   */
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      }
+    } catch (_) {}
+    // Gesture-unlock with a throwaway near-silent element — never put it in
+    // audioCache (that used to leave eat_crunch stuck at volume 0.001).
+    try {
+      const a = new Audio(SOUND_BASES[0] + SOUND_FILES.eat_crunch);
+      a.volume = 0.001;
+      a.play()
+        .then(() => {
+          try {
+            a.pause();
+            a.currentTime = 0;
+          } catch (_) {}
+        })
+        .catch(() => {});
+    } catch (_) {}
+  }
 
   function playSound(fileName) {
+    unlockAudio();
     // Try each base; fail silently like VBA Dir check
     const tryPlay = (bases, i) => {
       if (i >= bases.length) return;
@@ -468,6 +639,7 @@
           tryPlay(bases, i + 1);
         }, { once: true });
       }
+      audio.volume = 1;
       audio.currentTime = 0;
       audio.play().catch(() => tryPlay(bases, i + 1));
     };
@@ -498,6 +670,7 @@
       entitiesEl.appendChild(baneEl);
     }
     state.baneCol = 5;
+    resetJump();
     placeBane();
   }
 
@@ -505,10 +678,81 @@
     if (!baneEl) return;
     const { left, top } = centerInCell(state.baneCol, 7, BANE_W, BANE_H);
     baneEl.style.left = left + "px";
-    baneEl.style.top = top + "px";
+    baneEl.style.top = top - state.baneJumpOffset + "px";
     baneEl.style.width = BANE_W + "px";
     baneEl.style.height = BANE_H + "px";
     baneEl.style.zIndex = "8";
+  }
+
+  function clearJumpAnim() {
+    if (state.jumpAnimId) {
+      clearTimeout(state.jumpAnimId);
+      state.timers.delete(state.jumpAnimId);
+      state.jumpAnimId = null;
+    }
+  }
+
+  function resetJump() {
+    clearJumpAnim();
+    state.baneJumping = false;
+    state.baneJumpOffset = 0;
+  }
+
+  /**
+   * Animate baneJumpOffset from `from` to `to` over `durationMs`, then call `onDone`.
+   * placeBane each tick so left/right mid-jump and baneBox() stay in sync.
+   */
+  function animateJumpOffset(from, to, durationMs, onDone) {
+    const started = performance.now();
+    const tick = () => {
+      if (!state.bFormRunning) {
+        resetJump();
+        placeBane();
+        return;
+      }
+      const t = Math.min(1, (performance.now() - started) / durationMs);
+      // Ease-out on ascent, ease-in on descent (sink)
+      const eased = to > from ? 1 - Math.pow(1 - t, 2) : t * t;
+      state.baneJumpOffset = from + (to - from) * eased;
+      placeBane();
+      if (t < 1) {
+        state.jumpAnimId = schedule(tick, JUMP_TICK_MS);
+      } else {
+        state.jumpAnimId = null;
+        state.baneJumpOffset = to;
+        placeBane();
+        if (onDone) onDone();
+      }
+    };
+    tick();
+  }
+
+  /** Two-row hop (trial): rise JUMP_HEIGHT, then sink back to the catch row. */
+  function startJump() {
+    if (!state.bFormRunning) return;
+    const now = performance.now();
+    if (now < state.unlockTime) {
+      state.keyboardLocked = true;
+      return;
+    }
+    if (state.keyboardLocked) {
+      state.keyboardLocked = false;
+      updateHud();
+    }
+    if (state.baneJumping) return;
+    if (state.jumpStamina <= 0) return;
+
+    state.jumpStamina -= 1;
+    state.baneJumping = true;
+    clearJumpAnim();
+    animateJumpOffset(0, JUMP_HEIGHT, JUMP_UP_MS, () => {
+      animateJumpOffset(JUMP_HEIGHT, 0, JUMP_DOWN_MS, () => {
+        state.baneJumping = false;
+        state.baneJumpOffset = 0;
+        placeBane();
+      });
+    });
+    updateHud();
   }
 
   /** Bane only while the match is running (after Good Luck, before Game Over). */
@@ -528,8 +772,15 @@
     };
   }
 
+  /** True while rising/sinking — no column change mid-air (straight-up jump only). */
+  function isBaneAirborne() {
+    return state.baneJumping || state.baneJumpOffset > 0;
+  }
+
   function moveImage(direction) {
     if (!state.bFormRunning) return;
+    // Sebastian: left/right only on the catch row — no air strafe / side-jump.
+    if (isBaneAirborne()) return;
     const now = performance.now();
     // Unlock only when the latest unlockTime has elapsed (every Pineapple
     // catch restarts unlockTime — never honor a stale earlier window).
@@ -833,6 +1084,14 @@
     const stopLine = rowTop(7);
     const approxTopLeftRow = itemTopLeftExcelRow(item);
 
+    // While airborne, apply the same AABB catch as on the ground using the
+    // current jumped baneBox() — items can meet Bane one row higher.
+    if (state.baneJumpOffset > 0 && checkCollisionWithBane(item)) {
+      item.el.remove();
+      updateCellValues(item.name, true);
+      return false;
+    }
+
     if (approxTopLeftRow === 6) {
       if (checkCollisionWithBane(item)) {
         item.el.remove();
@@ -991,6 +1250,8 @@
   function showUserForm() {
     state.lives = 3;
     state.score = 0;
+    state.jumpStamina = JUMP_STAMINA_MAX;
+    state.jumpRefillAccMs = 0;
     state.bGameRunning = true;
     state.bGameEnded = false;
     state.keyboardLocked = false;
@@ -1013,13 +1274,16 @@
     setBaneVisible(true);
     state.bFormRunning = true;
     state.bMoveDownRunning = true;
-    setStatus("Spiel läuft — Pfeiltasten ← → · Esc beendet");
+    setStatus("Spiel läuft — Pfeiltasten ← → ↑ · Touch-Pad · Esc beendet");
     focusStage();
     updateTimer();
     dropItems();
     startPoodleMovement();
     // VBA resets lives to 3 again after StartPoodleMovement
     state.lives = 3;
+    state.jumpStamina = JUMP_STAMINA_MAX;
+    startJumpRefillLoop();
+    setShown(touchControls, true);
     updateHud();
     focusStage();
     fitViewport();
@@ -1059,6 +1323,10 @@
     state.moveLoopActive = false;
     state.pendingSecondary = false;
     state.increasedStepActive = false;
+    resetJump();
+    clearJumpRefillTick();
+    stopPadRepeat();
+    setShown(touchControls, false);
     setBaneVisible(false);
     clearAllTimers();
     speedDeactivateId = null;
@@ -1092,11 +1360,19 @@
         setStatus("Bereit — Start Game für eine neue Runde");
         if (askName) {
           showNameModal(finalScore);
-        } else if (finalScore > state.highscore) {
-          // Edge: beat HUD best but somehow not list — still refresh best display
-          state.highscore = finalScore;
-          localStorage.setItem(HS_KEY, String(finalScore));
-          highscoreEl.textContent = String(finalScore);
+        } else {
+          if (finalScore > 0) {
+            showToast(
+              "Dein Score: " + finalScore + formatHighscoreRankLine(finalScore),
+              3500
+            );
+          }
+          if (finalScore > state.highscore) {
+            // Edge: beat HUD best but somehow not list — still refresh best display
+            state.highscore = finalScore;
+            localStorage.setItem(HS_KEY, String(finalScore));
+            highscoreEl.textContent = String(finalScore);
+          }
         }
       }, 3000);
     }, 200);
@@ -1145,13 +1421,13 @@
     finishNameEntry(nameInput.value);
   });
   document.getElementById("name-skip").addEventListener("click", () => {
-    finishNameEntry("Player");
+    skipNameEntry();
   });
   document.getElementById("name-modal-x").addEventListener("click", () => {
-    finishNameEntry("Player");
+    skipNameEntry();
   });
   nameModal.addEventListener("click", (e) => {
-    if (e.target === nameModal) finishNameEntry("Player");
+    if (e.target === nameModal) skipNameEntry();
   });
 
   function showIntro() {
@@ -1197,7 +1473,7 @@
     if (isModalOpen()) {
       if (e.key === "Escape") {
         e.preventDefault();
-        if (!nameModal.hidden) finishNameEntry("Player");
+        if (!nameModal.hidden) skipNameEntry();
         else if (!hsModal.hidden) hideHighscoreModal();
         else closeModal();
       }
@@ -1210,12 +1486,18 @@
     } else if (e.key === "ArrowRight" || e.key === "Right") {
       e.preventDefault();
       moveImage("Right");
+    } else if (e.key === "ArrowUp" || e.key === "Up") {
+      e.preventDefault();
+      startJump();
     } else if (e.key === "a" || e.key === "A") {
       e.preventDefault();
       moveImage("Left");
     } else if (e.key === "d" || e.key === "D") {
       e.preventDefault();
       moveImage("Right");
+    } else if (e.key === "w" || e.key === "W") {
+      e.preventDefault();
+      startJump();
     } else if (e.key === "Escape") {
       e.preventDefault();
       endGame();
@@ -1226,8 +1508,75 @@
   // or Arrow keys fire twice when the stage is focused.
   document.addEventListener("keydown", handleGameKey, true);
 
+  // First gesture unlocks audio (Start / pad / stage / menu).
+  ["pointerdown", "touchstart", "keydown"].forEach((evt) => {
+    document.addEventListener(evt, unlockAudio, { capture: true, passive: true, once: false });
+  });
+
+  // --- On-screen pad (hold-to-repeat ← →, tap ↑) ---
+  const PAD_REPEAT_MS = 140;
+  let padRepeatId = null;
+  let padRepeatDir = null;
+
+  function stopPadRepeat() {
+    if (padRepeatId) {
+      clearTimeout(padRepeatId);
+      state.timers.delete(padRepeatId);
+      padRepeatId = null;
+    }
+    padRepeatDir = null;
+    if (btnPadLeft) btnPadLeft.classList.remove("is-held");
+    if (btnPadRight) btnPadRight.classList.remove("is-held");
+  }
+
+  function startPadRepeat(direction) {
+    stopPadRepeat();
+    padRepeatDir = direction;
+    const btn = direction === "Left" ? btnPadLeft : btnPadRight;
+    if (btn) btn.classList.add("is-held");
+    const tick = () => {
+      if (!state.bFormRunning || padRepeatDir !== direction) return;
+      moveImage(direction);
+      padRepeatId = schedule(tick, PAD_REPEAT_MS);
+    };
+    moveImage(direction);
+    padRepeatId = schedule(tick, PAD_REPEAT_MS);
+  }
+
+  function bindPadHold(btn, direction) {
+    if (!btn) return;
+    const down = (e) => {
+      e.preventDefault();
+      unlockAudio();
+      focusStage();
+      if (!state.bFormRunning) return;
+      startPadRepeat(direction);
+    };
+    const up = (e) => {
+      e.preventDefault();
+      stopPadRepeat();
+    };
+    btn.addEventListener("pointerdown", down);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointerleave", up);
+    btn.addEventListener("pointercancel", up);
+  }
+
+  bindPadHold(btnPadLeft, "Left");
+  bindPadHold(btnPadRight, "Right");
+  if (btnPadJump) {
+    btnPadJump.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      unlockAudio();
+      focusStage();
+      if (!state.bFormRunning) return;
+      startJump();
+    });
+  }
+
   // Touch / click columns while playing — also refocus for subsequent keys
   stage.addEventListener("pointerdown", (e) => {
+    unlockAudio();
     focusStage();
     if (!state.bFormRunning) return;
     const rect = stage.getBoundingClientRect();
@@ -1237,6 +1586,33 @@
     if (col < state.baneCol) moveImage("Left");
     else if (col > state.baneCol) moveImage("Right");
   });
+
+  /**
+   * Capacitor shell (when running inside a native WebView after `cap sync`).
+   * Back button → close modal or end match; no-op if Capacitor is absent.
+   */
+  function wireCapacitorShell() {
+    const Cap = window.Capacitor;
+    if (!Cap || !Cap.Plugins || !Cap.Plugins.App) {
+      console.info("[Strawberry Bane] Capacitor App plugin not present (browser mode).");
+      return;
+    }
+    try {
+      Cap.Plugins.App.addListener("backButton", () => {
+        if (isModalOpen()) {
+          if (!nameModal.hidden) skipNameEntry();
+          else if (!hsModal.hidden) hideHighscoreModal();
+          else closeModal();
+          return;
+        }
+        if (state.bFormRunning) endGame();
+      });
+      console.info("[Strawberry Bane] Capacitor backButton wired.");
+    } catch (err) {
+      console.warn("[Strawberry Bane] Capacitor wire failed:", err);
+    }
+  }
+  wireCapacitorShell();
 
   btnStart.addEventListener("click", beginStartSequence);
   btnIntro.addEventListener("click", showIntro);
@@ -1248,9 +1624,10 @@
   setShown(overlayGoodLuck, false);
   setShown(overlayGameOver, false);
   setShown(toast, false);
+  setShown(touchControls, false);
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
-  setStatus("Bereit — Start Game · Klicke das Spielfeld, dann ← →");
+  setStatus("Bereit — Start Game · Klicke das Spielfeld oder nutze ← → ↑");
   fitViewport();
   // Re-fit after images (logo) load — height can change
   window.addEventListener("load", fitViewport);
