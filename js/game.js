@@ -145,6 +145,7 @@
   const nameForm = document.getElementById("name-form");
   const nameInput = document.getElementById("player-name");
   const nameScoreEl = document.getElementById("name-score");
+  const nameRankEl = document.getElementById("name-rank");
 
   // Sync CSS vars (logical size — never make these responsive percentages)
   document.documentElement.style.setProperty("--stage-w", STAGE_W + "px");
@@ -308,6 +309,43 @@
     return score > list[list.length - 1].score;
   }
 
+  /**
+   * Preview Top-10 place for a score before it is saved.
+   * Rank = 1 + #entries with strictly higher score (ties share that place).
+   */
+  function previewHighscoreRank(score) {
+    const s = Math.round(score);
+    const list = loadHighscoreList();
+    const qualifies = qualifiesForHighscoreList(s);
+    let better = 0;
+    let tied = 0;
+    for (const e of list) {
+      if (e.score > s) better += 1;
+      else if (e.score === s) tied += 1;
+    }
+    const rank = better + 1;
+    return { qualifies, rank, tied, listLen: list.length };
+  }
+
+  /** German line for the name-modal / toast, e.g. "· Platz 3 in den Top 10". */
+  function formatHighscoreRankLine(score) {
+    const info = previewHighscoreRank(score);
+    if (!info.qualifies) {
+      return " · leider nicht in den Top 10";
+    }
+    if (info.tied > 0) {
+      return (
+        " · Platz " +
+        info.rank +
+        " in den Top 10 (gleichauf mit " +
+        info.tied +
+        (info.tied === 1 ? " Eintrag" : " Einträgen") +
+        ")"
+      );
+    }
+    return " · Platz " + info.rank + " in den Top 10";
+  }
+
   function addHighscoreEntry(name, score) {
     const list = loadHighscoreList();
     list.push({
@@ -355,6 +393,7 @@
   function showNameModal(score) {
     pendingHsScore = score;
     nameScoreEl.textContent = String(score);
+    if (nameRankEl) nameRankEl.textContent = formatHighscoreRankLine(score);
     nameInput.value = "";
     setShown(nameModal, true);
     schedule(() => nameInput.focus(), 50);
@@ -1316,11 +1355,19 @@
         setStatus("Bereit — Start Game für eine neue Runde");
         if (askName) {
           showNameModal(finalScore);
-        } else if (finalScore > state.highscore) {
-          // Edge: beat HUD best but somehow not list — still refresh best display
-          state.highscore = finalScore;
-          localStorage.setItem(HS_KEY, String(finalScore));
-          highscoreEl.textContent = String(finalScore);
+        } else {
+          if (finalScore > 0) {
+            showToast(
+              "Dein Score: " + finalScore + formatHighscoreRankLine(finalScore),
+              3500
+            );
+          }
+          if (finalScore > state.highscore) {
+            // Edge: beat HUD best but somehow not list — still refresh best display
+            state.highscore = finalScore;
+            localStorage.setItem(HS_KEY, String(finalScore));
+            highscoreEl.textContent = String(finalScore);
+          }
         }
       }, 3000);
     }, 200);

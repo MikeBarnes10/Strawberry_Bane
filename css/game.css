@@ -468,6 +468,10 @@ body {
   color: #5c3a2c;
   text-align: center;
 }
+.name-rank {
+  font-weight: 700;
+  color: var(--berry-deep, #b91028);
+}
 .modal-note code {
   font-size: 0.82em;
   background: rgba(225, 35, 58, 0.08);
