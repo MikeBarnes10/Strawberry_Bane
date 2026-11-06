@@ -413,6 +413,11 @@
     }
   }
 
+  /** Skip / dismiss: close without writing a highscore entry. */
+  function skipNameEntry() {
+    hideNameModal();
+  }
+
   // Seed HUD best from list / legacy single value
   {
     const seeded = migrateLegacyHighscore();
@@ -1416,13 +1421,13 @@
     finishNameEntry(nameInput.value);
   });
   document.getElementById("name-skip").addEventListener("click", () => {
-    finishNameEntry("Player");
+    skipNameEntry();
   });
   document.getElementById("name-modal-x").addEventListener("click", () => {
-    finishNameEntry("Player");
+    skipNameEntry();
   });
   nameModal.addEventListener("click", (e) => {
-    if (e.target === nameModal) finishNameEntry("Player");
+    if (e.target === nameModal) skipNameEntry();
   });
 
   function showIntro() {
@@ -1468,7 +1473,7 @@
     if (isModalOpen()) {
       if (e.key === "Escape") {
         e.preventDefault();
-        if (!nameModal.hidden) finishNameEntry("Player");
+        if (!nameModal.hidden) skipNameEntry();
         else if (!hsModal.hidden) hideHighscoreModal();
         else closeModal();
       }
@@ -1595,7 +1600,7 @@
     try {
       Cap.Plugins.App.addListener("backButton", () => {
         if (isModalOpen()) {
-          if (!nameModal.hidden) finishNameEntry("Player");
+          if (!nameModal.hidden) skipNameEntry();
           else if (!hsModal.hidden) hideHighscoreModal();
           else closeModal();
           return;
