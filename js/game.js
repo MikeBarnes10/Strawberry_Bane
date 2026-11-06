@@ -564,10 +564,10 @@
         if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
       }
     } catch (_) {}
-    // Warm one real asset at near-silent volume so later play() calls succeed.
-    const warm = SOUND_BASES[0] + SOUND_FILES.eat_crunch;
+    // Gesture-unlock with a throwaway near-silent element — never put it in
+    // audioCache (that used to leave eat_crunch stuck at volume 0.001).
     try {
-      const a = new Audio(warm);
+      const a = new Audio(SOUND_BASES[0] + SOUND_FILES.eat_crunch);
       a.volume = 0.001;
       a.play()
         .then(() => {
@@ -577,7 +577,6 @@
           } catch (_) {}
         })
         .catch(() => {});
-      audioCache.set(warm, a);
     } catch (_) {}
   }
 
@@ -596,6 +595,7 @@
           tryPlay(bases, i + 1);
         }, { once: true });
       }
+      audio.volume = 1;
       audio.currentTime = 0;
       audio.play().catch(() => tryPlay(bases, i + 1));
     };
