@@ -135,6 +135,10 @@
   const btnHelp = document.getElementById("btn-help");
   const btnCredits = document.getElementById("btn-credits");
   const btnHighscore = document.getElementById("btn-highscore");
+  const touchControls = document.getElementById("touch-controls");
+  const btnPadLeft = document.getElementById("btn-pad-left");
+  const btnPadRight = document.getElementById("btn-pad-right");
+  const btnPadJump = document.getElementById("btn-pad-jump");
   const hsModal = document.getElementById("hs-modal");
   const hsListEl = document.getElementById("hs-list");
   const nameModal = document.getElementById("name-modal");
@@ -543,8 +547,42 @@
 
   // --- Sound ---
   const audioCache = new Map();
+  let audioUnlocked = false;
+  let audioCtx = null;
+
+  /**
+   * Mobile autoplay: unlock HTMLAudio + AudioContext on the first user gesture.
+   * Safe to call repeatedly; no-ops after the first success path.
+   */
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      }
+    } catch (_) {}
+    // Warm one real asset at near-silent volume so later play() calls succeed.
+    const warm = SOUND_BASES[0] + SOUND_FILES.eat_crunch;
+    try {
+      const a = new Audio(warm);
+      a.volume = 0.001;
+      a.play()
+        .then(() => {
+          try {
+            a.pause();
+            a.currentTime = 0;
+          } catch (_) {}
+        })
+        .catch(() => {});
+      audioCache.set(warm, a);
+    } catch (_) {}
+  }
 
   function playSound(fileName) {
+    unlockAudio();
     // Try each base; fail silently like VBA Dir check
     const tryPlay = (bases, i) => {
       if (i >= bases.length) return;
@@ -1192,7 +1230,7 @@
     setBaneVisible(true);
     state.bFormRunning = true;
     state.bMoveDownRunning = true;
-    setStatus("Spiel läuft — Pfeiltasten ← → ↑ springen · Esc beendet");
+    setStatus("Spiel läuft — Pfeiltasten ← → ↑ · Touch-Pad · Esc beendet");
     focusStage();
     updateTimer();
     dropItems();
@@ -1201,6 +1239,7 @@
     state.lives = 3;
     state.jumpStamina = JUMP_STAMINA_MAX;
     startJumpRefillLoop();
+    setShown(touchControls, true);
     updateHud();
     focusStage();
     fitViewport();
@@ -1242,6 +1281,8 @@
     state.increasedStepActive = false;
     resetJump();
     clearJumpRefillTick();
+    stopPadRepeat();
+    setShown(touchControls, false);
     setBaneVisible(false);
     clearAllTimers();
     speedDeactivateId = null;
@@ -1415,8 +1456,75 @@
   // or Arrow keys fire twice when the stage is focused.
   document.addEventListener("keydown", handleGameKey, true);
 
+  // First gesture unlocks audio (Start / pad / stage / menu).
+  ["pointerdown", "touchstart", "keydown"].forEach((evt) => {
+    document.addEventListener(evt, unlockAudio, { capture: true, passive: true, once: false });
+  });
+
+  // --- On-screen pad (hold-to-repeat ← →, tap ↑) ---
+  const PAD_REPEAT_MS = 140;
+  let padRepeatId = null;
+  let padRepeatDir = null;
+
+  function stopPadRepeat() {
+    if (padRepeatId) {
+      clearTimeout(padRepeatId);
+      state.timers.delete(padRepeatId);
+      padRepeatId = null;
+    }
+    padRepeatDir = null;
+    if (btnPadLeft) btnPadLeft.classList.remove("is-held");
+    if (btnPadRight) btnPadRight.classList.remove("is-held");
+  }
+
+  function startPadRepeat(direction) {
+    stopPadRepeat();
+    padRepeatDir = direction;
+    const btn = direction === "Left" ? btnPadLeft : btnPadRight;
+    if (btn) btn.classList.add("is-held");
+    const tick = () => {
+      if (!state.bFormRunning || padRepeatDir !== direction) return;
+      moveImage(direction);
+      padRepeatId = schedule(tick, PAD_REPEAT_MS);
+    };
+    moveImage(direction);
+    padRepeatId = schedule(tick, PAD_REPEAT_MS);
+  }
+
+  function bindPadHold(btn, direction) {
+    if (!btn) return;
+    const down = (e) => {
+      e.preventDefault();
+      unlockAudio();
+      focusStage();
+      if (!state.bFormRunning) return;
+      startPadRepeat(direction);
+    };
+    const up = (e) => {
+      e.preventDefault();
+      stopPadRepeat();
+    };
+    btn.addEventListener("pointerdown", down);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointerleave", up);
+    btn.addEventListener("pointercancel", up);
+  }
+
+  bindPadHold(btnPadLeft, "Left");
+  bindPadHold(btnPadRight, "Right");
+  if (btnPadJump) {
+    btnPadJump.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      unlockAudio();
+      focusStage();
+      if (!state.bFormRunning) return;
+      startJump();
+    });
+  }
+
   // Touch / click columns while playing — also refocus for subsequent keys
   stage.addEventListener("pointerdown", (e) => {
+    unlockAudio();
     focusStage();
     if (!state.bFormRunning) return;
     const rect = stage.getBoundingClientRect();
@@ -1426,6 +1534,33 @@
     if (col < state.baneCol) moveImage("Left");
     else if (col > state.baneCol) moveImage("Right");
   });
+
+  /**
+   * Capacitor shell (when running inside a native WebView after `cap sync`).
+   * Back button → close modal or end match; no-op if Capacitor is absent.
+   */
+  function wireCapacitorShell() {
+    const Cap = window.Capacitor;
+    if (!Cap || !Cap.Plugins || !Cap.Plugins.App) {
+      console.info("[Strawberry Bane] Capacitor App plugin not present (browser mode).");
+      return;
+    }
+    try {
+      Cap.Plugins.App.addListener("backButton", () => {
+        if (isModalOpen()) {
+          if (!nameModal.hidden) finishNameEntry("Player");
+          else if (!hsModal.hidden) hideHighscoreModal();
+          else closeModal();
+          return;
+        }
+        if (state.bFormRunning) endGame();
+      });
+      console.info("[Strawberry Bane] Capacitor backButton wired.");
+    } catch (err) {
+      console.warn("[Strawberry Bane] Capacitor wire failed:", err);
+    }
+  }
+  wireCapacitorShell();
 
   btnStart.addEventListener("click", beginStartSequence);
   btnIntro.addEventListener("click", showIntro);
@@ -1437,9 +1572,10 @@
   setShown(overlayGoodLuck, false);
   setShown(overlayGameOver, false);
   setShown(toast, false);
+  setShown(touchControls, false);
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
-  setStatus("Bereit — Start Game · Klicke das Spielfeld, dann ← → ↑");
+  setStatus("Bereit — Start Game · Klicke das Spielfeld oder nutze ← → ↑");
   fitViewport();
   // Re-fit after images (logo) load — height can change
   window.addEventListener("load", fitViewport);

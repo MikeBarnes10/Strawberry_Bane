@@ -48,6 +48,8 @@ body {
   width: 100vw;
   height: 100%;
   height: 100dvh;
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0)
+    env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
   overflow: hidden;
 }
 
@@ -538,6 +540,52 @@ body {
 #hs-modal .modal-actions,
 #name-modal .modal-actions {
   padding-bottom: 0.35rem;
+}
+
+/* On-screen pad for mobile / touch (shown while a match runs) */
+.touch-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: var(--stage-w, 770px);
+  margin: 0.35rem auto 0.15rem;
+  padding: 0.15rem 0.25rem;
+  box-sizing: border-box;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.touch-controls[hidden] {
+  display: none !important;
+}
+.pad-btn {
+  appearance: none;
+  min-height: 52px;
+  border: 2px solid #f0a888;
+  border-radius: 16px;
+  background: linear-gradient(#fff, #ffe9d8);
+  color: var(--ink);
+  font-size: 1.55rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 0 rgba(180, 80, 50, 0.18);
+  touch-action: manipulation;
+}
+.pad-btn:active,
+.pad-btn.is-held {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(180, 80, 50, 0.18);
+  filter: brightness(0.97);
+}
+.pad-btn.pad-jump {
+  background: linear-gradient(#ffe8c8, #ffc878);
+  border-color: #e09a40;
+}
+.pad-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Stage stays fixed 770×610; viewport fit is via uniform #app scale in JS. */
