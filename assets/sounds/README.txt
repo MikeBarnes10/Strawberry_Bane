@@ -13,3 +13,5 @@ Original gameplay theme loop (soft under SFX):
   theme_gameplay.mp3
 
 Also mirrored at: /cursor/stores/self/media/sounds/
+
+theme_gameplay.* — original SNES-style chiptune loop (~148 BPM); soft under SFX.
