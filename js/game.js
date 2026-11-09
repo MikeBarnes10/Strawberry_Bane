@@ -1402,6 +1402,8 @@
     updateHud();
     focusStage();
     fitViewport();
+    // Round-start woof (existing bark) once Good Luck ends — not on menus.
+    playSound(SOUND_FILES.bark_dislike);
     startThemeMusic();
   }
 
