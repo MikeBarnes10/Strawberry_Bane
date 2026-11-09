@@ -8,3 +8,5 @@ dinosaur_noise.wav
 gorilla_entry.wav
 theme_gameplay.ogg
 theme_gameplay.mp3
+game_over.ogg
+game_over.mp3
