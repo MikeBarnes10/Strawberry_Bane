@@ -1274,7 +1274,7 @@
     setBaneVisible(true);
     state.bFormRunning = true;
     state.bMoveDownRunning = true;
-    setStatus("Spiel läuft — ← → ↑ · Touch-Pad · Gamepad Stick/A/Y · Esc beendet");
+    setStatus("Spiel läuft — ← → ↑ · Touch-Pad · Gamepad Stick/D-Pad/A/Y · Esc beendet");
     focusStage();
     updateTimer();
     dropItems();
@@ -1614,11 +1614,14 @@
   }
   wireCapacitorShell();
 
-  // --- Gamepad API (Standard mapping: A=0, Y=3, left stick axes 0/1) ---
+  // --- Gamepad API (Standard: A=0, Y=3, left stick axes 0/1, D-pad 12/14/15) ---
   const GP_DEADZONE = 0.38;
   const GP_MOVE_REPEAT_MS = 140;
   const GP_BTN_A = 0;
   const GP_BTN_Y = 3;
+  const GP_BTN_DPAD_UP = 12;
+  const GP_BTN_DPAD_LEFT = 14;
+  const GP_BTN_DPAD_RIGHT = 15;
   let gpPrevA = false;
   let gpPrevY = false;
   let gpPrevJump = false;
@@ -1631,24 +1634,35 @@
     return typeof button === "object" ? !!button.pressed : button === 1.0;
   }
 
-  function applyGamepadStick(axes) {
+  // Stick + D-pad share the same move/jump rules as keyboard (via moveImage/startJump).
+  function applyGamepadMove(pad) {
+    const axes = pad.axes || [];
+    const btns = pad.buttons || [];
     const x = axes[0] || 0;
     const y = axes[1] || 0;
     const ax = Math.abs(x);
     const ay = Math.abs(y);
 
-    // Jump: stick up past deadzone (edge-triggered)
-    const wantJump = y < -GP_DEADZONE && ay >= ax;
+    const stickJump = y < -GP_DEADZONE && ay >= ax;
+    const stickLeft = ax > GP_DEADZONE && ax >= ay && x < 0;
+    const stickRight = ax > GP_DEADZONE && ax >= ay && x > 0;
+
+    const dpadJump = gpPressed(btns[GP_BTN_DPAD_UP]);
+    const dpadLeft = gpPressed(btns[GP_BTN_DPAD_LEFT]);
+    const dpadRight = gpPressed(btns[GP_BTN_DPAD_RIGHT]);
+
+    const wantJump = stickJump || dpadJump;
     if (wantJump && !gpPrevJump) {
       if (state.bFormRunning && !isModalOpen()) startJump();
     }
     gpPrevJump = wantJump;
 
-    // Horizontal move with hold-repeat (same cadence as touch pad)
     let dir = null;
-    if (ax > GP_DEADZONE && ax >= ay) {
-      dir = x < 0 ? "Left" : "Right";
-    }
+    const wantLeft = stickLeft || dpadLeft;
+    const wantRight = stickRight || dpadRight;
+    if (wantLeft && !wantRight) dir = "Left";
+    else if (wantRight && !wantLeft) dir = "Right";
+
     const now = performance.now();
     if (dir && state.bFormRunning && !isModalOpen()) {
       if (dir !== gpMoveDir || now - gpLastMoveAt >= GP_MOVE_REPEAT_MS) {
@@ -1696,7 +1710,7 @@
 
       gpPrevA = aDown;
       gpPrevY = yDown;
-      applyGamepadStick(pad.axes || []);
+      applyGamepadMove(pad);
       break; // first connected pad only
     }
     if (!any) {
@@ -1743,7 +1757,7 @@
   setShown(touchControls, false);
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
-  setStatus("Bereit — Start Game · ← → ↑ · Gamepad A/Y + Stick");
+  setStatus("Bereit — Start Game · ← → ↑ · Gamepad A/Y + Stick/D-Pad");
   fitViewport();
   // Re-fit after images (logo) load — height can change
   window.addEventListener("load", fitViewport);
