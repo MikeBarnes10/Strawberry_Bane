@@ -102,6 +102,11 @@
     gorilla_entry: "gorilla_entry.wav",
   };
 
+  /** Original gameplay theme loop (ogg preferred, mp3 fallback). Soft vs SFX. */
+  const THEME_CANDIDATES = ["theme_gameplay.ogg", "theme_gameplay.mp3"];
+  /** ~20% of SFX (SFX play at volume 1) so effects stay clearly audible. */
+  const THEME_VOLUME = 0.2;
+
   // Sound search paths (game folder + store media)
   const SOUND_BASES = [
     "assets/sounds/",
@@ -593,13 +598,20 @@
   const audioCache = new Map();
   let audioUnlocked = false;
   let audioCtx = null;
+  let themeAudio = null;
+  let themeWanted = false;
+  let themeLoading = false;
 
   /**
    * Mobile autoplay: unlock HTMLAudio + AudioContext on the first user gesture.
    * Safe to call repeatedly; no-ops after the first success path.
    */
   function unlockAudio() {
-    if (audioUnlocked) return;
+    if (audioUnlocked) {
+      // Resume theme if play was requested before unlock / autoplay allowed it.
+      if (themeWanted && (!themeAudio || themeAudio.paused)) startThemeMusic();
+      return;
+    }
     audioUnlocked = true;
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -622,6 +634,7 @@
         })
         .catch(() => {});
     } catch (_) {}
+    if (themeWanted) startThemeMusic();
   }
 
   function playSound(fileName) {
@@ -644,6 +657,73 @@
       audio.play().catch(() => tryPlay(bases, i + 1));
     };
     tryPlay(SOUND_BASES, 0);
+  }
+
+  /**
+   * Quiet original looping theme during active play only (not menus).
+   * Starts on ShowUserForm / round start; stopped on endGame / Esc.
+   */
+  function startThemeMusic() {
+    themeWanted = true;
+    if (themeAudio && !themeAudio.paused) {
+      themeAudio.volume = THEME_VOLUME;
+      return;
+    }
+    if (themeAudio) {
+      themeAudio.volume = THEME_VOLUME;
+      themeAudio.play().catch(() => {});
+      return;
+    }
+    if (themeLoading) return;
+    themeLoading = true;
+
+    const tryTheme = (fileIdx, baseIdx) => {
+      if (!themeWanted) {
+        themeLoading = false;
+        return;
+      }
+      if (fileIdx >= THEME_CANDIDATES.length) {
+        themeLoading = false;
+        return;
+      }
+      if (baseIdx >= SOUND_BASES.length) {
+        tryTheme(fileIdx + 1, 0);
+        return;
+      }
+      const url = SOUND_BASES[baseIdx] + THEME_CANDIDATES[fileIdx];
+      const audio = new Audio(url);
+      audio.loop = true;
+      audio.volume = THEME_VOLUME;
+      audio.preload = "auto";
+      const fail = () => {
+        tryTheme(fileIdx, baseIdx + 1);
+      };
+      audio.addEventListener("error", fail, { once: true });
+      audio
+        .play()
+        .then(() => {
+          if (!themeWanted) {
+            try {
+              audio.pause();
+            } catch (_) {}
+            themeLoading = false;
+            return;
+          }
+          themeAudio = audio;
+          themeLoading = false;
+        })
+        .catch(fail);
+    };
+    tryTheme(0, 0);
+  }
+
+  function stopThemeMusic() {
+    themeWanted = false;
+    if (!themeAudio) return;
+    try {
+      themeAudio.pause();
+      themeAudio.currentTime = 0;
+    } catch (_) {}
   }
 
   // --- Entities ---
@@ -1287,6 +1367,7 @@
     updateHud();
     focusStage();
     fitViewport();
+    startThemeMusic();
   }
 
   function beginStartSequence() {
@@ -1323,6 +1404,7 @@
     state.moveLoopActive = false;
     state.pendingSecondary = false;
     state.increasedStepActive = false;
+    stopThemeMusic();
     resetJump();
     clearJumpRefillTick();
     stopPadRepeat();

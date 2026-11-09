@@ -8,4 +8,8 @@ Place these WAV files here (same names as VBA PlaySound calls):
   dinosaur_noise.wav
   gorilla_entry.wav
 
+Original gameplay theme loop (soft under SFX):
+  theme_gameplay.ogg
+  theme_gameplay.mp3
+
 Also mirrored at: /cursor/stores/self/media/sounds/
