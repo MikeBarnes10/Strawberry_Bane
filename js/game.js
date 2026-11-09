@@ -106,6 +106,8 @@
   const THEME_CANDIDATES = ["theme_gameplay.ogg", "theme_gameplay.mp3"];
   /** ~20% of SFX (SFX play at volume 1) so effects stay clearly audible. */
   const THEME_VOLUME = 0.2;
+  /** Pause after round-start woof before theme begins (gameplay continues). */
+  const THEME_START_DELAY_MS = 1000;
 
   /** Short dramatic game-over sting (one-shot; ogg preferred, mp3 fallback). */
   const GAME_OVER_CANDIDATES = ["game_over.ogg", "game_over.mp3"];
@@ -480,6 +482,7 @@
     state.jumpAnimId = null;
     state.jumpRefillId = null;
     state.jumpRefillLastTick = 0;
+    themeStartId = null;
   }
 
   function setStatus(msg) {
@@ -606,6 +609,7 @@
   let themeAudio = null;
   let themeWanted = false;
   let themeLoading = false;
+  let themeStartId = null;
 
   /**
    * Mobile autoplay: unlock HTMLAudio + AudioContext on the first user gesture.
@@ -666,8 +670,25 @@
 
   /**
    * Quiet original looping theme during active play only (not menus).
-   * Starts on ShowUserForm / round start; stopped on endGame / Esc.
+   * Scheduled ~1s after round-start woof; stopped / cancelled on endGame / Esc.
    */
+  function cancelPendingThemeStart() {
+    if (themeStartId == null) return;
+    clearTimeout(themeStartId);
+    state.timers.delete(themeStartId);
+    themeStartId = null;
+  }
+
+  function scheduleThemeMusicStart() {
+    cancelPendingThemeStart();
+    themeStartId = schedule(() => {
+      themeStartId = null;
+      // Round may have ended during the woof→theme gap.
+      if (!state.bFormRunning && !state.bGameRunning) return;
+      startThemeMusic();
+    }, THEME_START_DELAY_MS);
+  }
+
   function startThemeMusic() {
     themeWanted = true;
     if (themeAudio && !themeAudio.paused) {
@@ -724,6 +745,7 @@
 
   function stopThemeMusic() {
     themeWanted = false;
+    cancelPendingThemeStart();
     if (!themeAudio) return;
     try {
       themeAudio.pause();
@@ -1402,9 +1424,9 @@
     updateHud();
     focusStage();
     fitViewport();
-    // Round-start woof (existing bark) once Good Luck ends — not on menus.
+    // Round-start woof immediately; theme follows after THEME_START_DELAY_MS.
     playSound(SOUND_FILES.bark_dislike);
-    startThemeMusic();
+    scheduleThemeMusicStart();
   }
 
   function beginStartSequence() {
