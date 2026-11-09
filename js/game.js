@@ -1274,7 +1274,7 @@
     setBaneVisible(true);
     state.bFormRunning = true;
     state.bMoveDownRunning = true;
-    setStatus("Spiel läuft — Pfeiltasten ← → ↑ · Touch-Pad · Esc beendet");
+    setStatus("Spiel läuft — ← → ↑ · Touch-Pad · Gamepad Stick/A/Y · Esc beendet");
     focusStage();
     updateTimer();
     dropItems();
@@ -1614,6 +1614,122 @@
   }
   wireCapacitorShell();
 
+  // --- Gamepad API (Standard mapping: A=0, Y=3, left stick axes 0/1) ---
+  const GP_DEADZONE = 0.38;
+  const GP_MOVE_REPEAT_MS = 140;
+  const GP_BTN_A = 0;
+  const GP_BTN_Y = 3;
+  let gpPrevA = false;
+  let gpPrevY = false;
+  let gpPrevJump = false;
+  let gpMoveDir = null; // "Left" | "Right" | null
+  let gpLastMoveAt = 0;
+  let gpPollId = null;
+
+  function gpPressed(button) {
+    if (!button) return false;
+    return typeof button === "object" ? !!button.pressed : button === 1.0;
+  }
+
+  function applyGamepadStick(axes) {
+    const x = axes[0] || 0;
+    const y = axes[1] || 0;
+    const ax = Math.abs(x);
+    const ay = Math.abs(y);
+
+    // Jump: stick up past deadzone (edge-triggered)
+    const wantJump = y < -GP_DEADZONE && ay >= ax;
+    if (wantJump && !gpPrevJump) {
+      if (state.bFormRunning && !isModalOpen()) startJump();
+    }
+    gpPrevJump = wantJump;
+
+    // Horizontal move with hold-repeat (same cadence as touch pad)
+    let dir = null;
+    if (ax > GP_DEADZONE && ax >= ay) {
+      dir = x < 0 ? "Left" : "Right";
+    }
+    const now = performance.now();
+    if (dir && state.bFormRunning && !isModalOpen()) {
+      if (dir !== gpMoveDir || now - gpLastMoveAt >= GP_MOVE_REPEAT_MS) {
+        moveImage(dir);
+        gpLastMoveAt = now;
+        gpMoveDir = dir;
+      }
+    } else {
+      gpMoveDir = null;
+    }
+  }
+
+  function pollGamepads() {
+    gpPollId = null;
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let any = false;
+    for (let i = 0; i < pads.length; i++) {
+      const pad = pads[i];
+      if (!pad) continue;
+      any = true;
+      unlockAudio();
+
+      const aDown = gpPressed(pad.buttons[GP_BTN_A]);
+      const yDown = gpPressed(pad.buttons[GP_BTN_Y]);
+
+      // A: start a match (edge)
+      if (aDown && !gpPrevA) {
+        if (isModalOpen()) {
+          // no-op on menus except name skip would be Y/Esc; A ignored
+        } else if (!state.bGameRunning && !state.bFormRunning) {
+          beginStartSequence();
+        }
+      }
+
+      // Y: Esc equivalent (edge) — close modal or end match
+      if (yDown && !gpPrevY) {
+        if (isModalOpen()) {
+          if (!nameModal.hidden) skipNameEntry();
+          else if (!hsModal.hidden) hideHighscoreModal();
+          else closeModal();
+        } else if (state.bFormRunning) {
+          endGame();
+        }
+      }
+
+      gpPrevA = aDown;
+      gpPrevY = yDown;
+      applyGamepadStick(pad.axes || []);
+      break; // first connected pad only
+    }
+    if (!any) {
+      gpPrevA = false;
+      gpPrevY = false;
+      gpPrevJump = false;
+      gpMoveDir = null;
+    }
+    gpPollId = requestAnimationFrame(pollGamepads);
+  }
+
+  function startGamepadLoop() {
+    if (gpPollId != null) return;
+    if (!navigator.getGamepads) {
+      console.info("[Strawberry Bane] Gamepad API not available.");
+      return;
+    }
+    gpPollId = requestAnimationFrame(pollGamepads);
+  }
+
+  window.addEventListener("gamepadconnected", (e) => {
+    console.info("[Strawberry Bane] Gamepad connected:", e.gamepad && e.gamepad.id);
+    unlockAudio();
+    startGamepadLoop();
+  });
+  window.addEventListener("gamepaddisconnected", () => {
+    gpPrevA = false;
+    gpPrevY = false;
+    gpPrevJump = false;
+    gpMoveDir = null;
+  });
+  startGamepadLoop();
+
   btnStart.addEventListener("click", beginStartSequence);
   btnIntro.addEventListener("click", showIntro);
   btnHelp.addEventListener("click", () => showHelp(1));
@@ -1627,7 +1743,7 @@
   setShown(touchControls, false);
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
-  setStatus("Bereit — Start Game · Klicke das Spielfeld oder nutze ← → ↑");
+  setStatus("Bereit — Start Game · ← → ↑ · Gamepad A/Y + Stick");
   fitViewport();
   // Re-fit after images (logo) load — height can change
   window.addEventListener("load", fitViewport);
