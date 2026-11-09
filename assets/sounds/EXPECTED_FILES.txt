@@ -6,3 +6,5 @@ hum_football.wav
 bear_noise.wav
 dinosaur_noise.wav
 gorilla_entry.wav
+theme_gameplay.ogg
+theme_gameplay.mp3
