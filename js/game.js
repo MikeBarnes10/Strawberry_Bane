@@ -107,6 +107,11 @@
   /** ~20% of SFX (SFX play at volume 1) so effects stay clearly audible. */
   const THEME_VOLUME = 0.2;
 
+  /** Short dramatic game-over sting (one-shot; ogg preferred, mp3 fallback). */
+  const GAME_OVER_CANDIDATES = ["game_over.ogg", "game_over.mp3"];
+  /** Match typical playSound level (SFX use volume 1). */
+  const GAME_OVER_VOLUME = 1;
+
   // Sound search paths (game folder + store media)
   const SOUND_BASES = [
     "assets/sounds/",
@@ -724,6 +729,36 @@
       themeAudio.pause();
       themeAudio.currentTime = 0;
     } catch (_) {}
+  }
+
+  /** One-shot dramatic sting when a round actually ends (endGame path only). */
+  function playGameOverSound() {
+    unlockAudio();
+    const tryPlay = (fileIdx, baseIdx) => {
+      if (fileIdx >= GAME_OVER_CANDIDATES.length) return;
+      if (baseIdx >= SOUND_BASES.length) {
+        tryPlay(fileIdx + 1, 0);
+        return;
+      }
+      const url = SOUND_BASES[baseIdx] + GAME_OVER_CANDIDATES[fileIdx];
+      let audio = audioCache.get(url);
+      if (!audio) {
+        audio = new Audio(url);
+        audioCache.set(url, audio);
+        audio.addEventListener(
+          "error",
+          () => {
+            audioCache.delete(url);
+            tryPlay(fileIdx, baseIdx + 1);
+          },
+          { once: true }
+        );
+      }
+      audio.volume = GAME_OVER_VOLUME;
+      audio.currentTime = 0;
+      audio.play().catch(() => tryPlay(fileIdx, baseIdx + 1));
+    };
+    tryPlay(0, 0);
   }
 
   // --- Entities ---
@@ -1405,6 +1440,7 @@
     state.pendingSecondary = false;
     state.increasedStepActive = false;
     stopThemeMusic();
+    playGameOverSound();
     resetJump();
     clearJumpRefillTick();
     stopPadRepeat();
