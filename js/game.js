@@ -53,13 +53,16 @@
   const HS_LIST_KEY = "strawberryBaneHighscoreList";
   const HS_SYNCED_KEY = "strawberryBaneHighscoreSynced";
   const HS_PENDING_KEY = "strawberryBaneHighscorePending";
+  /** Set to "1" after this browser’s one-time local→online import finishes. */
+  const HS_MIGRATED_KEY = "strawberryBaneHighscoreMigrated";
   const HS_MAX = 10;
   /** Scores API caps player names at 15 characters. */
   const HS_NAME_MAX = 15;
   /**
    * Shared Top-10 via Scores (https://scores.keithcirkel.co.uk) — CORS-friendly,
    no client wipe key. Read: GET /g/{id}.json. Write: POST /token then POST score.
-   localStorage remains cache + offline fallback; prior local rows migrate on load.
+   Prior local rows migrate once per browser (HS_MIGRATED_KEY); afterward only
+   new game-end saves (and pending retries) POST to Scores.
    */
   const HS_API_ID = "WjpIsJD3AF9H";
   const HS_API_BASE = "https://scores.keithcirkel.co.uk/g/" + HS_API_ID;
@@ -501,49 +504,87 @@
     return entry;
   }
 
+  function isHighscoreMigrated() {
+    return localStorage.getItem(HS_MIGRATED_KEY) === "1";
+  }
+
+  function markHighscoreMigrated() {
+    localStorage.setItem(HS_MIGRATED_KEY, "1");
+  }
+
   /**
-   * Upload this browser’s prior local (+ pending) scores that are not yet marked
-   * synced. Dedupes by name+score against the live remote board when available.
+   * Upload a candidate list to Scores (dedupe vs remote + synced keys).
+   * Failed posts stay in the pending queue for a later retry.
    */
-  async function syncLocalHighscoresToRemote() {
+  async function uploadHighscoreCandidates(candidates) {
+    let remote = [];
+    try {
+      remote = await fetchRemoteHighscores();
+      remoteHighscoreList = remote;
+      remoteHighscoreLive = true;
+    } catch (err) {
+      throw err;
+    }
+    const remoteKeys = new Set(remote.map(highscoreDedupeKey));
+    const synced = loadSyncedHighscoreKeys();
+    const todo = mergeHighscoreEntries(candidates).filter((e) => {
+      const key = highscoreDedupeKey(e);
+      if (synced.has(key) || remoteKeys.has(key)) {
+        synced.add(key);
+        removePendingHighscore(e);
+        return false;
+      }
+      return true;
+    });
+    saveSyncedHighscoreKeys(synced);
+
+    for (const entry of todo) {
+      try {
+        await submitRemoteHighscore(entry.name, entry.score);
+        remoteKeys.add(highscoreDedupeKey(entry));
+        await new Promise((r) => setTimeout(r, 350));
+      } catch (_) {
+        enqueuePendingHighscore(entry);
+      }
+    }
+  }
+
+  /** Retry failed new submits only (not a full local-list re-upload). */
+  async function retryPendingHighscores() {
+    const pending = loadPendingHighscores();
+    if (!pending.length || highscoreSyncInFlight) return;
+    highscoreSyncInFlight = true;
+    try {
+      await uploadHighscoreCandidates(pending);
+    } catch (_) {
+      // Leave pending for a later visit.
+    } finally {
+      highscoreSyncInFlight = false;
+    }
+  }
+
+  /**
+   * One-time local→online import for this browser. After HS_MIGRATED_KEY is set,
+   * only pending retries + new game-end saves hit Scores — never the full local cache.
+   */
+  async function migrateLocalHighscoresOnce() {
+    if (isHighscoreMigrated()) {
+      await retryPendingHighscores();
+      return;
+    }
     if (highscoreSyncInFlight) return;
     highscoreSyncInFlight = true;
     try {
-      // Always re-fetch when possible so we don't re-upload against a stale cache.
-      let remote = [];
       try {
-        remote = await fetchRemoteHighscores();
-        remoteHighscoreList = remote;
-        remoteHighscoreLive = true;
+        await uploadHighscoreCandidates(
+          mergeHighscoreEntries(loadHighscoreList(), loadPendingHighscores())
+        );
       } catch (_) {
-        remote = Array.isArray(remoteHighscoreList) ? remoteHighscoreList : [];
+        // Remote unreachable — leave flag unset so the next visit still migrates.
+        return;
       }
-      const remoteKeys = new Set(remote.map(highscoreDedupeKey));
-      const synced = loadSyncedHighscoreKeys();
-      const candidates = mergeHighscoreEntries(
-        loadHighscoreList(),
-        loadPendingHighscores()
-      ).filter((e) => {
-        const key = highscoreDedupeKey(e);
-        if (synced.has(key) || remoteKeys.has(key)) {
-          synced.add(key);
-          removePendingHighscore(e);
-          return false;
-        }
-        return true;
-      });
-      saveSyncedHighscoreKeys(synced);
-
-      for (const entry of candidates) {
-        try {
-          await submitRemoteHighscore(entry.name, entry.score);
-          remoteKeys.add(highscoreDedupeKey(entry));
-          // Brief pause so token IP binding / rate limits stay happy.
-          await new Promise((r) => setTimeout(r, 350));
-        } catch (_) {
-          enqueuePendingHighscore(entry);
-        }
-      }
+      // Import attempt finished (pending may still hold hard failures).
+      markHighscoreMigrated();
     } finally {
       highscoreSyncInFlight = false;
     }
@@ -699,7 +740,7 @@
       await refreshHighscoresFromRemote();
     } catch (_) {
       enqueuePendingHighscore(entry);
-      // Keep local board; sync will retry on next visit / Highscore open.
+      // Keep local board; pending retry runs on next visit / Highscore open.
     }
     return list;
   }
@@ -734,7 +775,8 @@
     );
     setShown(hsModal, true);
     try {
-      await syncLocalHighscoresToRemote();
+      // Never re-import the full local list here — only pending new-submit retries.
+      await retryPendingHighscores();
       const remote = await refreshHighscoresFromRemote();
       if (!hsModal.hidden) {
         renderHighscoreList(remote);
@@ -784,15 +826,15 @@
     hideNameModal();
   }
 
-  // Seed HUD best from list / legacy single value, then sync shared board.
+  // Seed HUD best from list / legacy single value, then one-time migrate + refresh.
   {
     const seeded = migrateLegacyHighscore();
     if (seeded.length) state.highscore = seeded[0].score;
   }
   highscoreEl.textContent = String(state.highscore);
-  // Fire-and-forget: migrate this browser’s local scores, then refresh Top-10.
+  // Fire-and-forget: one-time local import (if flag unset), then refresh Top-10.
   Promise.resolve()
-    .then(() => syncLocalHighscoresToRemote())
+    .then(() => migrateLocalHighscoresOnce())
     .then(() => refreshHighscoresFromRemote())
     .catch(() => {});
 
