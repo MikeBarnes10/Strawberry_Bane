@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -41,12 +41,12 @@
       <div class="hud-item"><img src="assets/ui/score.png" alt="" /><span id="score">0</span></div>
       <div class="hud-item"><img src="assets/ui/time.png" alt="" /><span id="time">00:00</span></div>
       <div class="hud-item"><img src="assets/ui/highscore.png" alt="" /><span id="highscore">0</span></div>
-      <div class="hud-hint">← → bewegen · ↑ springen · Esc beenden</div>
+      <div class="hud-hint">← → move · ↑ jump · Esc ends</div>
     </div>
 
     <div id="stage-wrap">
       <div id="stage-scale">
-        <div id="stage" tabindex="0" role="application" aria-label="Strawberry Bane Spielfeld">
+        <div id="stage" tabindex="0" role="application" aria-label="Strawberry Bane playfield">
           <img class="bg" src="assets/background/background.jpg" alt="" draggable="false" />
           <div id="entities"></div>
           <div id="overlay-goodluck" class="overlay" hidden>
@@ -55,16 +55,16 @@
           <div id="overlay-gameover" class="overlay" hidden>
             <img src="assets/ui/game-over.png" alt="Game Over" />
           </div>
-          <div id="freeze-banner" hidden>🍍 Freeze — Tastatur gesperrt</div>
+          <div id="freeze-banner" hidden>🍍 Freeze — controls locked</div>
           <div id="speed-banner" hidden>⚡ Speed ×1.5</div>
         </div>
       </div>
     </div>
 
     <div id="touch-controls" class="touch-controls" hidden>
-      <button type="button" class="pad-btn" id="btn-pad-left" aria-label="Links">←</button>
-      <button type="button" class="pad-btn" id="btn-pad-jump" aria-label="Springen">↑</button>
-      <button type="button" class="pad-btn" id="btn-pad-right" aria-label="Rechts">→</button>
+      <button type="button" class="pad-btn" id="btn-pad-left" aria-label="Left">←</button>
+      <button type="button" class="pad-btn" id="btn-pad-jump" aria-label="Jump">↑</button>
+      <button type="button" class="pad-btn" id="btn-pad-right" aria-label="Right">→</button>
     </div>
 
     <footer class="game-footer">
@@ -77,7 +77,7 @@
         <span class="footer-meta-sep" aria-hidden="true">·</span>
         <span class="copyright">© 2026</span>
       </p>
-      <p class="footer-assets">Assets: frei / selbst erstellt / KI · kein Fremd-Copyright · Code aus Excel-VBA.</p>
+      <p class="footer-assets">Assets: free / self-made / AI · no third-party copyright · code from Excel VBA.</p>
     </footer>
   </div>
   </div><!-- #fit-root -->
@@ -87,7 +87,7 @@
     <div class="modal-inner">
       <img id="modal-img" alt="" />
       <div class="modal-actions" id="modal-actions"></div>
-      <button type="button" class="modal-close" id="modal-close" title="Schließen">×</button>
+      <button type="button" class="modal-close" id="modal-close" title="Close">×</button>
     </div>
   </div>
 
@@ -95,12 +95,12 @@
   <div id="hs-modal" class="modal" hidden>
     <div class="modal-inner modal-panel">
       <h2 class="modal-title">Highscore</h2>
-      <p class="modal-note">Top 10 — gespeichert lokal im Browser (<code>localStorage</code>). Für eine echte Online-Rangliste bräuchte es später einen Server.</p>
+      <p class="modal-note">Top 10 — saved locally in this browser (<code>localStorage</code>). A real online leaderboard would need a server later.</p>
       <ol id="hs-list" class="hs-list"></ol>
       <div class="modal-actions">
         <button type="button" id="hs-close" class="menu-btn">Close</button>
       </div>
-      <button type="button" class="modal-close" id="hs-modal-x" title="Schließen">×</button>
+      <button type="button" class="modal-close" id="hs-modal-x" title="Close">×</button>
     </div>
   </div>
 
@@ -109,9 +109,9 @@
     <div class="modal-inner modal-panel modal-panel-sm">
       <h2 class="modal-title">New Highscore!</h2>
       <p class="modal-note">
-        Dein Score: <strong id="name-score">0</strong>
+        Your score: <strong id="name-score">0</strong>
         <span id="name-rank" class="name-rank"></span>
-        — wie heißt du?
+        — what’s your name?
       </p>
       <form id="name-form" class="name-form">
         <label for="player-name">Name</label>
@@ -121,7 +121,7 @@
           type="text"
           maxlength="20"
           autocomplete="nickname"
-          placeholder="Dein Name"
+          placeholder="Your name"
           required
         />
         <div class="modal-actions">
@@ -129,7 +129,7 @@
           <button type="button" id="name-skip" class="menu-btn">Skip</button>
         </div>
       </form>
-      <button type="button" class="modal-close" id="name-modal-x" title="Schließen">×</button>
+      <button type="button" class="modal-close" id="name-modal-x" title="Close">×</button>
     </div>
   </div>
 
