@@ -95,7 +95,11 @@
   <div id="hs-modal" class="modal" hidden>
     <div class="modal-inner modal-panel">
       <h2 class="modal-title">Highscore</h2>
-      <p class="modal-note">Top 10 — saved locally in this browser (<code>localStorage</code>). A real online leaderboard would need a server later.</p>
+      <p class="modal-note">
+        Shared Top 10 — online for every player on this site.
+        Earlier scores from this browser sync automatically when you open the game.
+        <span id="hs-source" class="hs-source"></span>
+      </p>
       <ol id="hs-list" class="hs-list"></ol>
       <div class="modal-actions">
         <button type="button" id="hs-close" class="menu-btn">Close</button>
@@ -119,7 +123,7 @@
           id="player-name"
           name="player-name"
           type="text"
-          maxlength="20"
+          maxlength="15"
           autocomplete="nickname"
           placeholder="Your name"
           required

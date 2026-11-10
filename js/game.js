@@ -51,7 +51,18 @@
   /** Best score (HUD). Full top-10 list lives under HS_LIST_KEY in localStorage. */
   const HS_KEY = "strawberryBaneHighscore";
   const HS_LIST_KEY = "strawberryBaneHighscoreList";
+  const HS_SYNCED_KEY = "strawberryBaneHighscoreSynced";
+  const HS_PENDING_KEY = "strawberryBaneHighscorePending";
   const HS_MAX = 10;
+  /** Scores API caps player names at 15 characters. */
+  const HS_NAME_MAX = 15;
+  /**
+   * Shared Top-10 via Scores (https://scores.keithcirkel.co.uk) — CORS-friendly,
+   no client wipe key. Read: GET /g/{id}.json. Write: POST /token then POST score.
+   localStorage remains cache + offline fallback; prior local rows migrate on load.
+   */
+  const HS_API_ID = "WjpIsJD3AF9H";
+  const HS_API_BASE = "https://scores.keithcirkel.co.uk/g/" + HS_API_ID;
   /** Local fallback + cache for the shared games-played counter. */
   const GAMES_PLAYED_KEY = "strawberryBaneGamesPlayed";
   /**
@@ -284,38 +295,133 @@
     pendingSecondary: false,
   };
 
-  // --- Highscore list (localStorage JSON “database”) ---
+  // --- Highscore list (shared online + localStorage cache/fallback) ---
+  /** Latest successful remote Top-N (null until first fetch). */
+  let remoteHighscoreList = null;
+  let remoteHighscoreLive = false;
+  let highscoreSyncInFlight = false;
+
+  function normalizeHighscoreEntry(e) {
+    if (!e || typeof e.score !== "number" || !Number.isFinite(e.score)) return null;
+    const score = Math.max(0, Math.round(e.score));
+    if (score <= 0) return null;
+    return {
+      name: String(e.name || "Player")
+        .trim()
+        .slice(0, HS_NAME_MAX) || "Player",
+      score,
+      date: e.date ? String(e.date).slice(0, 10) : "",
+    };
+  }
+
+  /** Dedupe key: same player name + score collapses (keeps best/dated copy). */
+  function highscoreDedupeKey(e) {
+    return String(e.name || "Player").trim().toLowerCase() + "|" + Math.round(e.score);
+  }
+
+  function mergeHighscoreEntries() {
+    const map = new Map();
+    for (let i = 0; i < arguments.length; i++) {
+      const list = arguments[i];
+      if (!Array.isArray(list)) continue;
+      for (const raw of list) {
+        const e = normalizeHighscoreEntry(raw);
+        if (!e) continue;
+        const key = highscoreDedupeKey(e);
+        const prev = map.get(key);
+        if (!prev) {
+          map.set(key, e);
+          continue;
+        }
+        // Prefer the copy that still carries a local date stamp.
+        if (e.date && !prev.date) map.set(key, e);
+      }
+    }
+    return Array.from(map.values())
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .slice(0, HS_MAX);
+  }
+
   function loadHighscoreList() {
     try {
       const raw = localStorage.getItem(HS_LIST_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
-      return parsed
-        .filter((e) => e && typeof e.score === "number")
-        .map((e) => ({
-          name: String(e.name || "Player").slice(0, 20),
-          score: Math.max(0, Math.round(e.score)),
-          date: e.date || "",
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, HS_MAX);
+      return mergeHighscoreEntries(parsed);
     } catch (_) {
       return [];
     }
   }
 
   function saveHighscoreList(list) {
-    const cleaned = list
-      .slice()
-      .sort((a, b) => b.score - a.score)
-      .slice(0, HS_MAX);
+    const cleaned = mergeHighscoreEntries(list);
     localStorage.setItem(HS_LIST_KEY, JSON.stringify(cleaned));
     const best = cleaned.length ? cleaned[0].score : 0;
     state.highscore = best;
     localStorage.setItem(HS_KEY, String(best));
     highscoreEl.textContent = String(best);
     return cleaned;
+  }
+
+  /** Effective board for qualify/rank/UI: remote when live, else local cache. */
+  function getEffectiveHighscoreList() {
+    if (remoteHighscoreLive && Array.isArray(remoteHighscoreList)) {
+      return mergeHighscoreEntries(remoteHighscoreList, loadHighscoreList());
+    }
+    return loadHighscoreList();
+  }
+
+  function loadSyncedHighscoreKeys() {
+    try {
+      const raw = localStorage.getItem(HS_SYNCED_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function saveSyncedHighscoreKeys(set) {
+    localStorage.setItem(HS_SYNCED_KEY, JSON.stringify(Array.from(set)));
+  }
+
+  function markHighscoreSynced(entry) {
+    const e = normalizeHighscoreEntry(entry);
+    if (!e) return;
+    const set = loadSyncedHighscoreKeys();
+    set.add(highscoreDedupeKey(e));
+    saveSyncedHighscoreKeys(set);
+  }
+
+  function loadPendingHighscores() {
+    try {
+      const raw = localStorage.getItem(HS_PENDING_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? mergeHighscoreEntries(parsed) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function savePendingHighscores(list) {
+    localStorage.setItem(
+      HS_PENDING_KEY,
+      JSON.stringify(mergeHighscoreEntries(list))
+    );
+  }
+
+  function enqueuePendingHighscore(entry) {
+    const e = normalizeHighscoreEntry(entry);
+    if (!e) return;
+    savePendingHighscores(mergeHighscoreEntries(loadPendingHighscores(), [e]));
+  }
+
+  function removePendingHighscore(entry) {
+    const key = highscoreDedupeKey(entry);
+    savePendingHighscores(
+      loadPendingHighscores().filter((e) => highscoreDedupeKey(e) !== key)
+    );
   }
 
   /** Migrate legacy single highscore number into a list entry once. */
@@ -325,7 +431,11 @@
     const legacy = Number(localStorage.getItem(HS_KEY) || 0);
     if (legacy > 0) {
       return saveHighscoreList([
-        { name: "Player", score: legacy, date: new Date().toISOString().slice(0, 10) },
+        {
+          name: "Player",
+          score: legacy,
+          date: new Date().toISOString().slice(0, 10),
+        },
       ]);
     }
     return list;
@@ -333,9 +443,130 @@
 
   function qualifiesForHighscoreList(score) {
     if (!(score > 0)) return false;
-    const list = loadHighscoreList();
+    const list = getEffectiveHighscoreList();
     if (list.length < HS_MAX) return true;
     return score > list[list.length - 1].score;
+  }
+
+  async function fetchRemoteHighscores() {
+    const res = await fetch(HS_API_BASE + ".json", {
+      method: "GET",
+      mode: "cors",
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error("hs get " + res.status);
+    const data = await res.json();
+    const scores = Array.isArray(data && data.scores) ? data.scores : [];
+    return mergeHighscoreEntries(
+      scores.map((s) => ({
+        name: s && s.name,
+        score: s && s.score,
+        date: "",
+      }))
+    );
+  }
+
+  async function requestHighscoreToken() {
+    const res = await fetch(HS_API_BASE + "/token", {
+      method: "POST",
+      mode: "cors",
+    });
+    if (!res.ok) throw new Error("hs token " + res.status);
+    const data = await res.json();
+    if (!data || !data.token) throw new Error("hs token missing");
+    return String(data.token);
+  }
+
+  async function submitRemoteHighscore(name, score) {
+    const entry = normalizeHighscoreEntry({ name, score, date: "" });
+    if (!entry) throw new Error("hs invalid entry");
+    const token = await requestHighscoreToken();
+    const body = new URLSearchParams({
+      token,
+      name: entry.name,
+      score: String(entry.score),
+    });
+    const res = await fetch(HS_API_BASE, {
+      method: "POST",
+      mode: "cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error("hs submit " + res.status + " " + text.slice(0, 80));
+    }
+    markHighscoreSynced(entry);
+    removePendingHighscore(entry);
+    return entry;
+  }
+
+  /**
+   * Upload this browser’s prior local (+ pending) scores that are not yet marked
+   * synced. Dedupes by name+score against the live remote board when available.
+   */
+  async function syncLocalHighscoresToRemote() {
+    if (highscoreSyncInFlight) return;
+    highscoreSyncInFlight = true;
+    try {
+      // Always re-fetch when possible so we don't re-upload against a stale cache.
+      let remote = [];
+      try {
+        remote = await fetchRemoteHighscores();
+        remoteHighscoreList = remote;
+        remoteHighscoreLive = true;
+      } catch (_) {
+        remote = Array.isArray(remoteHighscoreList) ? remoteHighscoreList : [];
+      }
+      const remoteKeys = new Set(remote.map(highscoreDedupeKey));
+      const synced = loadSyncedHighscoreKeys();
+      const candidates = mergeHighscoreEntries(
+        loadHighscoreList(),
+        loadPendingHighscores()
+      ).filter((e) => {
+        const key = highscoreDedupeKey(e);
+        if (synced.has(key) || remoteKeys.has(key)) {
+          synced.add(key);
+          removePendingHighscore(e);
+          return false;
+        }
+        return true;
+      });
+      saveSyncedHighscoreKeys(synced);
+
+      for (const entry of candidates) {
+        try {
+          await submitRemoteHighscore(entry.name, entry.score);
+          remoteKeys.add(highscoreDedupeKey(entry));
+          // Brief pause so token IP binding / rate limits stay happy.
+          await new Promise((r) => setTimeout(r, 350));
+        } catch (_) {
+          enqueuePendingHighscore(entry);
+        }
+      }
+    } finally {
+      highscoreSyncInFlight = false;
+    }
+  }
+
+  async function refreshHighscoresFromRemote() {
+    try {
+      const remote = await fetchRemoteHighscores();
+      remoteHighscoreList = remote;
+      remoteHighscoreLive = true;
+      // Keep local dates where possible; remote wins for shared ranking.
+      saveHighscoreList(mergeHighscoreEntries(remote, loadHighscoreList()));
+      return remote;
+    } catch (_) {
+      remoteHighscoreLive = false;
+      return loadHighscoreList();
+    }
+  }
+
+  function setHighscoreSourceNote(text) {
+    const el = document.getElementById("hs-source");
+    if (!el) return;
+    el.textContent = text ? " " + text : "";
   }
 
   // --- Games played counter (shared CounterAPI + localStorage fallback) ---
@@ -419,7 +650,7 @@
    */
   function previewHighscoreRank(score) {
     const s = Math.round(score);
-    const list = loadHighscoreList();
+    const list = getEffectiveHighscoreList();
     const qualifies = qualifiesForHighscoreList(s);
     let better = 0;
     let tied = 0;
@@ -450,27 +681,40 @@
     return " · rank " + info.rank + " in the Top 10";
   }
 
-  function addHighscoreEntry(name, score) {
-    const list = loadHighscoreList();
-    list.push({
-      name: (name || "Player").trim().slice(0, 20) || "Player",
-      score: Math.round(score),
+  function addHighscoreEntryLocal(name, score) {
+    const entry = normalizeHighscoreEntry({
+      name,
+      score,
       date: new Date().toISOString().slice(0, 10),
     });
-    return saveHighscoreList(list);
+    if (!entry) return loadHighscoreList();
+    return saveHighscoreList(mergeHighscoreEntries(loadHighscoreList(), [entry]));
   }
 
-  function renderHighscoreList() {
-    const list = loadHighscoreList();
+  async function addHighscoreEntry(name, score) {
+    const list = addHighscoreEntryLocal(name, score);
+    const entry = normalizeHighscoreEntry({ name, score, date: "" });
+    try {
+      await submitRemoteHighscore(entry.name, entry.score);
+      await refreshHighscoresFromRemote();
+    } catch (_) {
+      enqueuePendingHighscore(entry);
+      // Keep local board; sync will retry on next visit / Highscore open.
+    }
+    return list;
+  }
+
+  function renderHighscoreList(list) {
+    const rows = Array.isArray(list) ? list : getEffectiveHighscoreList();
     hsListEl.innerHTML = "";
-    if (!list.length) {
+    if (!rows.length) {
       const empty = document.createElement("li");
       empty.className = "hs-empty";
       empty.textContent = "No entries yet — play a round!";
       hsListEl.appendChild(empty);
       return;
     }
-    list.forEach((entry, i) => {
+    rows.forEach((entry, i) => {
       const li = document.createElement("li");
       li.innerHTML =
         `<span class="hs-rank">${i + 1}.</span>` +
@@ -483,9 +727,25 @@
     });
   }
 
-  function showHighscoreModal() {
-    renderHighscoreList();
+  async function showHighscoreModal() {
+    renderHighscoreList(getEffectiveHighscoreList());
+    setHighscoreSourceNote(
+      remoteHighscoreLive ? "(online)" : "(local — reconnecting…)"
+    );
     setShown(hsModal, true);
+    try {
+      await syncLocalHighscoresToRemote();
+      const remote = await refreshHighscoresFromRemote();
+      if (!hsModal.hidden) {
+        renderHighscoreList(remote);
+        setHighscoreSourceNote("(online)");
+      }
+    } catch (_) {
+      if (!hsModal.hidden) {
+        renderHighscoreList(loadHighscoreList());
+        setHighscoreSourceNote("(local — offline)");
+      }
+    }
   }
 
   function hideHighscoreModal() {
@@ -508,12 +768,14 @@
     pendingHsScore = 0;
   }
 
-  function finishNameEntry(name) {
+  async function finishNameEntry(name) {
     const score = pendingHsScore;
     hideNameModal();
     if (score > 0) {
-      addHighscoreEntry(name, score);
-      showToast("Highscore saved: " + (name || "Player") + " — " + score);
+      const safeName =
+        String(name || "Player").trim().slice(0, HS_NAME_MAX) || "Player";
+      await addHighscoreEntry(safeName, score);
+      showToast("Highscore saved: " + safeName + " — " + score);
     }
   }
 
@@ -522,12 +784,17 @@
     hideNameModal();
   }
 
-  // Seed HUD best from list / legacy single value
+  // Seed HUD best from list / legacy single value, then sync shared board.
   {
     const seeded = migrateLegacyHighscore();
     if (seeded.length) state.highscore = seeded[0].score;
   }
   highscoreEl.textContent = String(state.highscore);
+  // Fire-and-forget: migrate this browser’s local scores, then refresh Top-10.
+  Promise.resolve()
+    .then(() => syncLocalHighscoresToRemote())
+    .then(() => refreshHighscoresFromRemote())
+    .catch(() => {});
 
   // --- Helpers ---
   function colLeft(colIndex) {
