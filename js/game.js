@@ -185,7 +185,7 @@
   // Stage must be focusable so arrow keys reach the game after clicking Start
   stage.tabIndex = 0;
   stage.setAttribute("role", "application");
-  stage.setAttribute("aria-label", "Strawberry Bane Spielfeld");
+  stage.setAttribute("aria-label", "Strawberry Bane playfield");
 
   /**
    * Stage stays a fixed 770×610 game grid (no sprite distortion).
@@ -431,23 +431,23 @@
     return { qualifies, rank, tied, listLen: list.length };
   }
 
-  /** German line for the name-modal / toast, e.g. "· Platz 3 in den Top 10". */
+  /** Rank line for the name-modal / toast, e.g. "· rank 3 in the Top 10". */
   function formatHighscoreRankLine(score) {
     const info = previewHighscoreRank(score);
     if (!info.qualifies) {
-      return " · leider nicht in den Top 10";
+      return " · not in the Top 10";
     }
     if (info.tied > 0) {
       return (
-        " · Platz " +
+        " · rank " +
         info.rank +
-        " in den Top 10 (gleichauf mit " +
+        " in the Top 10 (tied with " +
         info.tied +
-        (info.tied === 1 ? " Eintrag" : " Einträgen") +
+        (info.tied === 1 ? " entry" : " entries") +
         ")"
       );
     }
-    return " · Platz " + info.rank + " in den Top 10";
+    return " · rank " + info.rank + " in the Top 10";
   }
 
   function addHighscoreEntry(name, score) {
@@ -466,7 +466,7 @@
     if (!list.length) {
       const empty = document.createElement("li");
       empty.className = "hs-empty";
-      empty.textContent = "Noch keine Einträge — spiel eine Runde!";
+      empty.textContent = "No entries yet — play a round!";
       hsListEl.appendChild(empty);
       return;
     }
@@ -513,7 +513,7 @@
     hideNameModal();
     if (score > 0) {
       addHighscoreEntry(name, score);
-      showToast("Highscore gespeichert: " + (name || "Player") + " — " + score);
+      showToast("Highscore saved: " + (name || "Player") + " — " + score);
     }
   }
 
@@ -1483,7 +1483,7 @@
     setBaneVisible(true);
     state.bFormRunning = true;
     state.bMoveDownRunning = true;
-    setStatus("Spiel läuft — ← → ↑ · Touch-Pad · Gamepad Stick/D-Pad/A/Y · Esc beendet");
+    setStatus("Game running — ← → ↑ · Touch pad · Gamepad Stick/D-Pad/A/Y · Esc ends");
     focusStage();
     updateTimer();
     dropItems();
@@ -1575,13 +1575,13 @@
         setBaneVisible(false);
         setMenuEnabled(true);
         btnStart.disabled = false;
-        setStatus("Bereit — Start Game für eine neue Runde");
+        setStatus("Ready — Start Game for a new round");
         if (askName) {
           showNameModal(finalScore);
         } else {
           if (finalScore > 0) {
             showToast(
-              "Dein Score: " + finalScore + formatHighscoreRankLine(finalScore),
+              "Your score: " + finalScore + formatHighscoreRankLine(finalScore),
               3500
             );
           }
@@ -2060,7 +2060,7 @@
   setShown(touchControls, false);
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
-  setStatus("Bereit — Start Game · ← → ↑ · Gamepad A/Y + Stick/D-Pad");
+  setStatus("Ready — Start Game · ← → ↑ · Gamepad A/Y + Stick/D-Pad");
   refreshGamesPlayedDisplay();
   fitViewport();
   // Re-fit after images (logo) load — height can change
