@@ -52,6 +52,24 @@
   const HS_KEY = "strawberryBaneHighscore";
   const HS_LIST_KEY = "strawberryBaneHighscoreList";
   const HS_MAX = 10;
+  /** Local fallback + cache for the shared games-played counter. */
+  const GAMES_PLAYED_KEY = "strawberryBaneGamesPlayed";
+  /**
+   * Shared counter via Abacus (https://abacus.jasoncameron.dev) — CORS-friendly,
+   no auth. GET /get/{ns}/{key} reads; /hit/{ns}/{key} increments. localStorage fallback.
+   */
+  const GAMES_PLAYED_API_NS = "strawberry-bane-9a1";
+  const GAMES_PLAYED_API_KEY = "games_played";
+  const GAMES_PLAYED_API_GET =
+    "https://abacus.jasoncameron.dev/get/" +
+    GAMES_PLAYED_API_NS +
+    "/" +
+    GAMES_PLAYED_API_KEY;
+  const GAMES_PLAYED_API_HIT =
+    "https://abacus.jasoncameron.dev/hit/" +
+    GAMES_PLAYED_API_NS +
+    "/" +
+    GAMES_PLAYED_API_KEY;
 
   const ITEM_WEIGHTS = [
     ["Strawberry", 12],
@@ -149,6 +167,7 @@
   const btnPadLeft = document.getElementById("btn-pad-left");
   const btnPadRight = document.getElementById("btn-pad-right");
   const btnPadJump = document.getElementById("btn-pad-jump");
+  const gamesPlayedCountEl = document.getElementById("games-played-count");
   const hsModal = document.getElementById("hs-modal");
   const hsListEl = document.getElementById("hs-list");
   const nameModal = document.getElementById("name-modal");
@@ -317,6 +336,81 @@
     const list = loadHighscoreList();
     if (list.length < HS_MAX) return true;
     return score > list[list.length - 1].score;
+  }
+
+  // --- Games played counter (shared CounterAPI + localStorage fallback) ---
+  function readLocalGamesPlayed() {
+    const n = Number(localStorage.getItem(GAMES_PLAYED_KEY) || 0);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+
+  function writeLocalGamesPlayed(n) {
+    const v = Math.max(0, Math.floor(Number(n) || 0));
+    localStorage.setItem(GAMES_PLAYED_KEY, String(v));
+    return v;
+  }
+
+  function formatGamesPlayed(n) {
+    const v = Math.max(0, Math.floor(Number(n) || 0));
+    return String(v).padStart(4, "0");
+  }
+
+  function displayGamesPlayed(n) {
+    if (!gamesPlayedCountEl) return;
+    gamesPlayedCountEl.textContent = formatGamesPlayed(n);
+  }
+
+  function parseCounterApiCount(data) {
+    if (data == null) return null;
+    if (typeof data === "number" && Number.isFinite(data)) return Math.floor(data);
+    if (typeof data.count === "number") return Math.floor(data.count);
+    if (data.value != null && Number.isFinite(Number(data.value))) {
+      return Math.floor(Number(data.value));
+    }
+    return null;
+  }
+
+  async function fetchRemoteGamesPlayed() {
+    const res = await fetch(GAMES_PLAYED_API_GET, { method: "GET", mode: "cors" });
+    if (!res.ok) throw new Error("counter get " + res.status);
+    return parseCounterApiCount(await res.json());
+  }
+
+  async function hitRemoteGamesPlayed() {
+    const res = await fetch(GAMES_PLAYED_API_HIT, { method: "GET", mode: "cors" });
+    if (!res.ok) throw new Error("counter hit " + res.status);
+    return parseCounterApiCount(await res.json());
+  }
+
+  async function refreshGamesPlayedDisplay() {
+    const local = readLocalGamesPlayed();
+    displayGamesPlayed(local);
+    try {
+      const remote = await fetchRemoteGamesPlayed();
+      if (remote != null) {
+        const merged = Math.max(local, remote);
+        writeLocalGamesPlayed(merged);
+        displayGamesPlayed(merged);
+      }
+    } catch (_) {
+      // Keep local display — static hosting may be offline / API blocked.
+    }
+  }
+
+  async function recordGamePlayed() {
+    // Always bump local first so Esc/offline still moves the needle for this browser.
+    const localNext = writeLocalGamesPlayed(readLocalGamesPlayed() + 1);
+    displayGamesPlayed(localNext);
+    try {
+      const remote = await hitRemoteGamesPlayed();
+      if (remote != null) {
+        const merged = Math.max(localNext, remote);
+        writeLocalGamesPlayed(merged);
+        displayGamesPlayed(merged);
+      }
+    } catch (_) {
+      // local already updated
+    }
   }
 
   /**
@@ -1434,6 +1528,8 @@
 
   function endGame() {
     if (state.bGameEnded && !state.bFormRunning && !state.bGameRunning) return;
+    // Count only real rounds (after Good Luck → showUserForm), not menu Skip.
+    const countAttempt = !!state.bFormRunning;
     state.bFormRunning = false;
     state.bGameRunning = false;
     state.bGameEnded = true;
@@ -1446,7 +1542,9 @@
     resetJump();
     clearJumpRefillTick();
     stopPadRepeat();
+    clearAllPadHeld();
     setShown(touchControls, false);
+    if (countAttempt) recordGamePlayed();
     setBaneVisible(false);
     clearAllTimers();
     speedDeactivateId = null;
@@ -1588,6 +1686,58 @@
     openModal("assets/forms/credits.jpg", [{ label: "Close", close: true }]);
   }
 
+  // --- On-screen pad visual state (touch + keyboard + gamepad OR'd) ---
+  const padHeld = {
+    touch: { left: false, jump: false, right: false },
+    keyboard: { left: false, jump: false, right: false },
+    gamepad: { left: false, jump: false, right: false },
+  };
+
+  function syncPadHighlight() {
+    const left =
+      padHeld.touch.left || padHeld.keyboard.left || padHeld.gamepad.left;
+    const jump =
+      padHeld.touch.jump || padHeld.keyboard.jump || padHeld.gamepad.jump;
+    const right =
+      padHeld.touch.right || padHeld.keyboard.right || padHeld.gamepad.right;
+    if (btnPadLeft) btnPadLeft.classList.toggle("is-held", left);
+    if (btnPadJump) btnPadJump.classList.toggle("is-held", jump);
+    if (btnPadRight) btnPadRight.classList.toggle("is-held", right);
+  }
+
+  function setPadSource(source, dir, on) {
+    if (!padHeld[source] || !(dir in padHeld[source])) return;
+    padHeld[source][dir] = !!on;
+    syncPadHighlight();
+  }
+
+  function clearPadSource(source) {
+    if (!padHeld[source]) return;
+    padHeld[source].left = false;
+    padHeld[source].jump = false;
+    padHeld[source].right = false;
+    syncPadHighlight();
+  }
+
+  function clearAllPadHeld() {
+    clearPadSource("touch");
+    clearPadSource("keyboard");
+    clearPadSource("gamepad");
+  }
+
+  function padDirFromKey(key) {
+    if (key === "ArrowLeft" || key === "Left" || key === "a" || key === "A") {
+      return "left";
+    }
+    if (key === "ArrowRight" || key === "Right" || key === "d" || key === "D") {
+      return "right";
+    }
+    if (key === "ArrowUp" || key === "Up" || key === "w" || key === "W") {
+      return "jump";
+    }
+    return null;
+  }
+
   // --- Input (document capture so keys work even if focus left a button) ---
   function handleGameKey(e) {
     if (isModalOpen()) {
@@ -1600,23 +1750,35 @@
       return;
     }
     if (!state.bFormRunning) return;
+    if (e.repeat) {
+      // Still keep highlight while key auto-repeats
+      const d = padDirFromKey(e.key);
+      if (d) setPadSource("keyboard", d, true);
+      return;
+    }
     if (e.key === "ArrowLeft" || e.key === "Left") {
       e.preventDefault();
+      setPadSource("keyboard", "left", true);
       moveImage("Left");
     } else if (e.key === "ArrowRight" || e.key === "Right") {
       e.preventDefault();
+      setPadSource("keyboard", "right", true);
       moveImage("Right");
     } else if (e.key === "ArrowUp" || e.key === "Up") {
       e.preventDefault();
+      setPadSource("keyboard", "jump", true);
       startJump();
     } else if (e.key === "a" || e.key === "A") {
       e.preventDefault();
+      setPadSource("keyboard", "left", true);
       moveImage("Left");
     } else if (e.key === "d" || e.key === "D") {
       e.preventDefault();
+      setPadSource("keyboard", "right", true);
       moveImage("Right");
     } else if (e.key === "w" || e.key === "W") {
       e.preventDefault();
+      setPadSource("keyboard", "jump", true);
       startJump();
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -1624,16 +1786,24 @@
     }
   }
 
+  function handleGameKeyUp(e) {
+    const d = padDirFromKey(e.key);
+    if (!d) return;
+    setPadSource("keyboard", d, false);
+  }
+
   // Single document-level listener (capture) — do not also bind on #stage
   // or Arrow keys fire twice when the stage is focused.
   document.addEventListener("keydown", handleGameKey, true);
+  document.addEventListener("keyup", handleGameKeyUp, true);
+  window.addEventListener("blur", () => clearPadSource("keyboard"));
 
   // First gesture unlocks audio (Start / pad / stage / menu).
   ["pointerdown", "touchstart", "keydown"].forEach((evt) => {
     document.addEventListener(evt, unlockAudio, { capture: true, passive: true, once: false });
   });
 
-  // --- On-screen pad (hold-to-repeat ← →, tap ↑) ---
+  // --- On-screen pad (hold-to-repeat ← →, hold ↑ for jump highlight) ---
   const PAD_REPEAT_MS = 140;
   let padRepeatId = null;
   let padRepeatDir = null;
@@ -1645,15 +1815,14 @@
       padRepeatId = null;
     }
     padRepeatDir = null;
-    if (btnPadLeft) btnPadLeft.classList.remove("is-held");
-    if (btnPadRight) btnPadRight.classList.remove("is-held");
+    setPadSource("touch", "left", false);
+    setPadSource("touch", "right", false);
   }
 
   function startPadRepeat(direction) {
     stopPadRepeat();
     padRepeatDir = direction;
-    const btn = direction === "Left" ? btnPadLeft : btnPadRight;
-    if (btn) btn.classList.add("is-held");
+    setPadSource("touch", direction === "Left" ? "left" : "right", true);
     const tick = () => {
       if (!state.bFormRunning || padRepeatDir !== direction) return;
       moveImage(direction);
@@ -1685,13 +1854,22 @@
   bindPadHold(btnPadLeft, "Left");
   bindPadHold(btnPadRight, "Right");
   if (btnPadJump) {
-    btnPadJump.addEventListener("pointerdown", (e) => {
+    const jumpDown = (e) => {
       e.preventDefault();
       unlockAudio();
       focusStage();
+      setPadSource("touch", "jump", true);
       if (!state.bFormRunning) return;
       startJump();
-    });
+    };
+    const jumpUp = (e) => {
+      e.preventDefault();
+      setPadSource("touch", "jump", false);
+    };
+    btnPadJump.addEventListener("pointerdown", jumpDown);
+    btnPadJump.addEventListener("pointerup", jumpUp);
+    btnPadJump.addEventListener("pointerleave", jumpUp);
+    btnPadJump.addEventListener("pointercancel", jumpUp);
   }
 
   // Touch / click columns while playing — also refocus for subsequent keys
@@ -1771,17 +1949,21 @@
     const dpadLeft = gpPressed(btns[GP_BTN_DPAD_LEFT]);
     const dpadRight = gpPressed(btns[GP_BTN_DPAD_RIGHT]);
 
-    const wantJump = stickJump || dpadJump;
-    if (wantJump && !gpPrevJump) {
-      if (state.bFormRunning && !isModalOpen()) startJump();
-    }
-    gpPrevJump = wantJump;
+    const wantJump = stickJump || dpadJump || gpPressed(btns[GP_BTN_A]);
+    // A also starts matches when idle — only treat as jump while a round runs.
+    const jumpHeld = state.bFormRunning && !isModalOpen() && wantJump;
+    if (jumpHeld && !gpPrevJump) startJump();
+    gpPrevJump = jumpHeld;
 
     let dir = null;
     const wantLeft = stickLeft || dpadLeft;
     const wantRight = stickRight || dpadRight;
     if (wantLeft && !wantRight) dir = "Left";
     else if (wantRight && !wantLeft) dir = "Right";
+
+    setPadSource("gamepad", "left", !!dir && dir === "Left");
+    setPadSource("gamepad", "right", !!dir && dir === "Right");
+    setPadSource("gamepad", "jump", jumpHeld);
 
     const now = performance.now();
     if (dir && state.bFormRunning && !isModalOpen()) {
@@ -1838,6 +2020,7 @@
       gpPrevY = false;
       gpPrevJump = false;
       gpMoveDir = null;
+      clearPadSource("gamepad");
     }
     gpPollId = requestAnimationFrame(pollGamepads);
   }
@@ -1878,6 +2061,7 @@
   setupBane();
   setBaneVisible(false); // idle: no Bane until a match starts
   setStatus("Bereit — Start Game · ← → ↑ · Gamepad A/Y + Stick/D-Pad");
+  refreshGamesPlayedDisplay();
   fitViewport();
   // Re-fit after images (logo) load — height can change
   window.addEventListener("load", fitViewport);
