@@ -326,45 +326,53 @@ body {
   font-size: 0.92rem;
   opacity: 0.95;
 }
-/* Counter + © share one compact footer row */
+/* Counter + © must stay one horizontal row (never stack as block <p>s). */
 .footer-meta {
-  display: flex;
-  flex-wrap: wrap;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
   align-items: center;
   justify-content: center;
-  gap: 0.55rem 1rem;
+  gap: 0.45rem 0.65rem;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
   margin: 0.25rem 0 0;
   padding: 0 0.35rem;
+  text-align: center;
 }
-.copyright {
-  display: inline;
+.footer-meta > .games-played,
+.footer-meta > .copyright,
+.footer-meta > .footer-meta-sep {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   margin: 0;
   padding: 0;
+  white-space: nowrap;
+}
+.footer-meta-sep {
+  color: #8a6a58;
+  opacity: 0.55;
+  font-size: 12px;
+  line-height: 1;
+}
+.copyright {
   font-size: 12px;
   font-weight: 300;
   letter-spacing: 0.04em;
   color: #8a6a58;
   opacity: 0.75;
-  white-space: nowrap;
 }
 /* Early-2000s visitor-counter vibe in the footer chrome */
 .games-played {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   gap: 0.35rem;
-  margin: 0;
-  padding: 0;
   font-family: "Courier New", Courier, monospace;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: #6a4a3a;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 .games-played-label {
   opacity: 0.85;
@@ -390,6 +398,9 @@ body {
   .games-played-digits {
     min-width: 4ch;
     letter-spacing: 0.1em;
+  }
+  .footer-meta {
+    gap: 0.35rem 0.45rem;
   }
 }
 .footer-assets {
