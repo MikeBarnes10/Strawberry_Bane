@@ -63,12 +63,16 @@
 
     <div id="touch-controls" class="touch-controls" hidden>
       <button type="button" class="pad-btn" id="btn-pad-left" aria-label="Links">←</button>
-      <button type="button" class="pad-btn pad-jump" id="btn-pad-jump" aria-label="Springen">↑</button>
+      <button type="button" class="pad-btn" id="btn-pad-jump" aria-label="Springen">↑</button>
       <button type="button" class="pad-btn" id="btn-pad-right" aria-label="Rechts">→</button>
     </div>
 
     <footer class="game-footer">
       <p id="status" class="status" aria-live="polite"></p>
+      <p class="games-played" id="games-played" title="Total completed rounds (shared counter)">
+        <span class="games-played-label">Games played:</span>
+        <span class="games-played-digits" id="games-played-count">----</span>
+      </p>
       <p class="copyright">© 2026</p>
       <p class="footer-assets">Assets: frei / selbst erstellt / KI · kein Fremd-Copyright · Code aus Excel-VBA.</p>
     </footer>
